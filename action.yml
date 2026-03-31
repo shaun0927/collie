@@ -1,0 +1,22 @@
+name: 'Collie Bark'
+description: 'AI-powered GitHub issue/PR triage'
+inputs:
+  github-token:
+    description: 'GitHub token with write access'
+    required: true
+  anthropic-api-key:
+    description: 'Anthropic API key for LLM analysis'
+    required: true
+  repo:
+    description: 'Target repository (owner/repo)'
+    required: false
+runs:
+  using: 'composite'
+  steps:
+    - run: pip install collie
+      shell: bash
+    - run: collie bark ${{ inputs.repo || github.repository }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
