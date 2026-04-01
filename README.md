@@ -5,17 +5,18 @@
 <h1 align="center">Collie</h1>
 
 <p align="center">
-  <strong>AI-powered GitHub repository triage for solo maintainers</strong>
+  <strong>Codify your team's merge philosophy. Let AI triage the rest.</strong>
 </p>
 
 <p align="center">
-  <em>A Border Collie herding 500+ issues and PRs so you don't have to.</em>
+  <em>A Border Collie that herds 500+ issues and PRs — so your team reviews what matters, not everything.</em>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> |
   <a href="#commands">Commands</a> |
   <a href="#how-it-works">How It Works</a> |
+  <a href="#why-teams-love-collie">For Teams</a> |
   <a href="#mcp-setup">MCP Setup</a> |
   <a href="#github-action">GitHub Action</a>
 </p>
@@ -24,9 +25,11 @@
 
 ## The Problem
 
-You maintain an open-source project. It got popular. Now you have 500+ open issues and PRs, and you can't read them all. Dependabot PRs pile up, stale feature requests linger, and good contributions get lost in the noise.
+**Solo maintainer?** 500+ open issues. Dependabot PRs piling up. Good contributions buried in noise. You can't read them all.
 
-**Collie solves this.** It learns your merge philosophy through a Socratic interview, then triages every issue and PR — recommending merge, close, hold, or escalate — so you only review what matters.
+**Growing team?** Everyone reviews differently. New members don't know what to merge. Tribal knowledge lives in Slack threads that nobody can find. Your best reviewer goes on vacation and the queue stalls.
+
+**Collie solves both.** It captures your merge philosophy as a living document, then applies it to every issue and PR — recommending merge, close, hold, or escalate. Your standards stay consistent whether you have 1 reviewer or 20.
 
 ## Quick Start
 
@@ -107,12 +110,33 @@ New repos start in **training mode**:
 3. When satisfied, `collie unleash` enables execution
 4. `collie leash` returns to training anytime
 
+## Why Teams Love Collie
+
+Collie isn't just a triage bot. It's a **decision-making system** built on GitHub Discussions.
+
+| Pain point | How Collie fixes it |
+|---|---|
+| "What's our policy on dependabot PRs?" | Written in the Philosophy Discussion — anyone can read it |
+| New team member doesn't know what to approve | Philosophy + Queue give instant context, zero onboarding lag |
+| Senior reviewer is on vacation | Collie applies their standards to every PR, consistently |
+| PR reviews are subjective and inconsistent | Hard rules + escalation rules make the bar explicit |
+| Nobody knows why a PR was merged/rejected | Queue tracks every decision with reasons and timestamps |
+| Team standards drift over time | Every `collie reject` refines the philosophy — the team gets smarter |
+
+### Three Ways to Use Collie
+
+| Mode | Best for | How |
+|---|---|---|
+| **CLI** | Maintainers triaging manually | `collie bark` in your terminal |
+| **MCP** | AI-assisted review with Claude | Claude calls `collie_approve` as a tool |
+| **GitHub Action** | Fully automated daily triage | Cron job runs `collie bark` every night |
+
 ## Storage
 
-Collie uses **GitHub Discussions** as its only storage — no external database needed:
+Collie uses **GitHub Discussions** as its only storage — no external database, no config server:
 
-- **Philosophy**: A Discussion post with your merge rules (YAML) + philosophy (natural language)
-- **Queue**: A living document with recommendations, checkboxes for approval, and execution status
+- **Philosophy Discussion** — Your merge rules (YAML) + natural-language philosophy. Editable by anyone on the team. Version-tracked by GitHub's edit history.
+- **Queue Discussion** — A living document with recommendations, checkboxes for approval, and execution results. Toggle a checkbox to approve; the next bark run executes it.
 - Discussions are auto-created if you have admin access
 
 ## MCP Setup
@@ -204,17 +228,20 @@ tuning:
 
 ## FAQ
 
+**Q: Is this only for solo maintainers?**
+A: No. Collie works for teams of any size. The Philosophy Discussion becomes your team's shared review standard — new members read it on day one, and every rejection makes it smarter.
+
 **Q: Can Collie merge PRs automatically?**
-A: Only after you `collie unleash` and explicitly `collie approve`. Collie never acts without your approval.
+A: Only after you `collie unleash` and explicitly `collie approve`. Collie never acts without human approval.
 
 **Q: What if Collie recommends merging a bad PR?**
-A: Two safety layers protect you: (1) Collie only recommends merge for fully analyzed PRs, (2) you must approve before execution. Reject bad recommendations with `collie reject` to improve the philosophy.
+A: Two safety layers: (1) merge is only recommended for fully analyzed PRs, (2) you must approve before execution. `collie reject -r "reason"` feeds back into the philosophy so the same mistake doesn't happen twice.
 
 **Q: How much does it cost to run?**
-A: T1 analysis is free. T2/T3 use the Anthropic API. A typical 500-item repo costs $10-50 per full scan, and incremental runs (daily) are much cheaper.
+A: T1 analysis is free. T2/T3 use the Anthropic API. A typical 500-item repo costs $10-50 per full scan. Daily incremental runs are much cheaper (~$1-5).
 
 **Q: Does it work with private repos?**
-A: Not yet — v1 supports public repos only. Private repo support is planned for v2.
+A: Yes, as long as your `GITHUB_TOKEN` has access to the repo and Discussions are enabled.
 
 ## License
 
