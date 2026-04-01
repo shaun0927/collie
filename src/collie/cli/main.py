@@ -351,8 +351,9 @@ async def _status(owner: str, name: str, console: Console) -> None:
     gql, rest, _ = await _create_clients()
     from collie.commands.mode import ModeCommand
     from collie.core.stores.philosophy_store import PhilosophyStore
+    from collie.core.stores.queue_store import QueueStore
 
-    cmd = ModeCommand(PhilosophyStore(gql, rest))
+    cmd = ModeCommand(PhilosophyStore(gql, rest), QueueStore(gql, rest))
     report = await cmd.status(owner, name)
 
     if not report.has_philosophy:

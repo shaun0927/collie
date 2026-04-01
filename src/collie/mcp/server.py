@@ -194,7 +194,17 @@ async def _dispatch(name, args, gql, rest, phil_store, queue_store) -> str:
 
         llm = _create_llm_if_available()
         pipeline = BarkPipeline(gql, rest, phil_store, queue_store, llm)
-        report = await pipeline.run(owner, repo, cost_cap=args.get("cost_cap", 50.0))
+
+        async def _progress(message: str):
+            try:
+                ctx = server.request_context
+                await ctx.session.send_log_message(level="info", data=message)
+            except Exception:
+                pass
+
+        report = await pipeline.run(
+            owner, repo, cost_cap=args.get("cost_cap", 50.0), progress_callback=_progress
+        )
         return report.summary()
 
     elif name == "collie_approve":
