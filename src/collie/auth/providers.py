@@ -48,19 +48,52 @@ class LLMAuth:
 
     @classmethod
     def from_env(cls) -> "LLMAuth":
-        """Auto-detect LLM API key: ANTHROPIC_API_KEY > config.yaml."""
+        """Auto-detect LLM credentials: env vars > config.yaml > Codex CLI.
+
+        Checks (in order):
+          1. LLM_PROVIDER + LLM_API_KEY env vars
+          2. ANTHROPIC_API_KEY env var
+          3. OPENAI_API_KEY env var
+          4. Config yaml (llm_provider or anthropic_api_key)
+          5. Codex CLI availability
+        """
+        # Explicit provider env var
+        provider = os.environ.get("LLM_PROVIDER", "").lower()
+        llm_key = os.environ.get("LLM_API_KEY", "")
+        if provider and llm_key:
+            return cls(llm_key, provider)
+
+        # Anthropic env var
         key = os.environ.get("ANTHROPIC_API_KEY")
         if key:
             return cls(key, "anthropic")
-        # Try config.yaml
+
+        # OpenAI env var
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        if openai_key:
+            return cls(openai_key, "openai")
+
+        # Config yaml
         from collie.config import load_config
 
         cfg = load_config()
+        if cfg.llm_provider and cfg.llm_api_key:
+            return cls(cfg.llm_api_key, cfg.llm_provider)
         if cfg.anthropic_api_key:
             return cls(cfg.anthropic_api_key, "anthropic")
+
+        # Codex CLI (no API key needed)
+        import shutil
+
+        if shutil.which("codex"):
+            return cls("", "codex")
+
         raise AuthError(
-            "Anthropic API key not found.\n"
-            "Set ANTHROPIC_API_KEY environment variable or add it to ~/.collie/config.yaml.\n"
-            "  export ANTHROPIC_API_KEY=sk-ant-your_key_here\n"
-            "Get your key at: https://console.anthropic.com/settings/keys"
+            "No LLM provider found.\n"
+            "Options:\n"
+            "  export ANTHROPIC_API_KEY=sk-ant-...    # Anthropic (Claude)\n"
+            "  export OPENAI_API_KEY=sk-...           # OpenAI (GPT-4o)\n"
+            "  export LLM_PROVIDER=gemini LLM_API_KEY=...  # Google, Groq, etc.\n"
+            "  Install Codex CLI                      # OAuth, no key needed\n"
+            "  Add credentials to ~/.collie/config.yaml"
         )

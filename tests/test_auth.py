@@ -48,8 +48,12 @@ def test_llm_auth_from_env(monkeypatch):
 
 def test_llm_auth_missing(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.setattr("collie.config.load_config", lambda: CollieConfig())
-    with pytest.raises(AuthError, match="Anthropic API key not found"):
+    monkeypatch.setattr("shutil.which", lambda cmd: None)  # hide codex CLI
+    with pytest.raises(AuthError, match="No LLM provider found"):
         LLMAuth.from_env()
 
 
