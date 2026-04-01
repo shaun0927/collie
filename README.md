@@ -66,6 +66,7 @@ All commands follow a dog training theme:
 | `collie unleash <repo>` | **Activate** — Switch from training to active mode (enable execution) |
 | `collie leash <repo>` | **Deactivate** — Switch back to training mode |
 | `collie status <repo>` | **Status** — Show current mode, rules, and settings |
+| `collie mcp` | **MCP Server** — Start the MCP server for Claude Desktop / Claude Code integration |
 
 ## How It Works
 

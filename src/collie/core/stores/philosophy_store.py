@@ -97,5 +97,8 @@ class PhilosophyStore:
         if categories:
             return categories[0]["id"]
         raise ValueError(
-            f"No discussion categories found for {owner}/{repo}. Enable Discussions in repository settings."
+            f"No discussion categories found for {owner}/{repo}.\n"
+            "Discussions may be disabled on this repository.\n"
+            "If you are the repo admin, enable Discussions in Settings > Features > Discussions.\n"
+            "If you are not an admin, please ask the repo admin to enable Discussions."
         )

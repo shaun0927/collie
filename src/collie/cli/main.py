@@ -4,11 +4,13 @@ import asyncio
 import sys
 
 import click
+import httpx
 from rich.console import Console
 from rich.table import Table
 
 import collie
 from collie.auth import AuthError
+from collie.github.graphql import GitHubGraphQLError
 
 
 def parse_repo(repo: str) -> tuple[str, str]:
@@ -23,6 +25,29 @@ def handle_error(console: Console, e: Exception) -> None:
     """Display user-friendly error message."""
     if isinstance(e, AuthError):
         console.print(f"[red]Authentication error:[/red] {e}")
+    elif isinstance(e, GitHubGraphQLError):
+        msg = str(e)
+        if "NOT_FOUND" in msg:
+            console.print("[red]Repository not found.[/red]")
+            console.print("Please check the owner/repo name for typos.")
+            console.print("  Example: collie sit owner/repo")
+        else:
+            console.print(f"[red]GitHub API error:[/red] {e}")
+    elif isinstance(e, httpx.ConnectError):
+        console.print("[red]Network error:[/red] Please check your internet connection.")
+        console.print("  Ensure you can reach https://api.github.com")
+    elif isinstance(e, httpx.TimeoutException):
+        console.print("[red]Request timed out.[/red] Please check your internet connection and try again.")
+    elif isinstance(e, httpx.HTTPStatusError):
+        status = e.response.status_code
+        if status == 429:
+            retry_after = e.response.headers.get("retry-after", "60")
+            console.print("[yellow]Rate limited by GitHub API.[/yellow] Please try again later.")
+            console.print(f"  Estimated wait time: {retry_after} seconds.")
+        elif status == 403:
+            console.print(f"[yellow]Permission denied:[/yellow] {e}")
+        else:
+            console.print(f"[red]HTTP error {status}:[/red] {e}")
     elif isinstance(e, ValueError):
         console.print(f"[red]Error:[/red] {e}")
     elif isinstance(e, PermissionError):
@@ -76,6 +101,9 @@ async def _sit(owner: str, name: str, console: Console) -> None:
     gql, rest, llm = await _create_clients()
     from collie.commands.sit import RepoAnalyzer, SitInterviewer
     from collie.core.stores.philosophy_store import PhilosophyStore
+
+    # Validate repo exists before proceeding
+    await gql.get_repository_id(owner, name)
 
     analyzer = RepoAnalyzer(rest)
     console.print(f"[cyan]Analyzing {owner}/{name}...[/cyan]")
@@ -297,6 +325,14 @@ async def _leash(owner: str, name: str, console: Console) -> None:
     console.print(f"[yellow]Leashed.[/yellow] {owner}/{name} is now in training mode.")
     await gql.close()
     await rest.close()
+
+
+@main.command()
+def mcp() -> None:
+    """Start the MCP server for Claude Desktop / Claude Code integration."""
+    from collie.mcp.server import main as mcp_main
+
+    asyncio.run(mcp_main())
 
 
 @main.command()
