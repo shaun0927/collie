@@ -1,0 +1,23 @@
+# Example workflow for using Collie as a GitHub Action
+# Copy this to your repository's .github/workflows/ directory
+
+name: Collie Daily Triage
+on:
+  schedule:
+    - cron: '0 3 * * *'  # Daily at 3 AM UTC
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      discussions: write
+    steps:
+      - name: Run Collie Bark
+        uses: shaun0927/collie@main
+        with:
+          github-token: ${{ secrets.COLLIE_GITHUB_TOKEN }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          cost-cap: '30'

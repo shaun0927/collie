@@ -1,22 +1,50 @@
 name: 'Collie Bark'
-description: 'AI-powered GitHub issue/PR triage'
+description: 'AI-powered GitHub issue/PR triage — analyze, recommend, and execute'
+branding:
+  icon: 'git-pull-request'
+  color: 'blue'
+
 inputs:
   github-token:
-    description: 'GitHub token with write access'
+    description: 'GitHub token with write access to the target repository'
     required: true
   anthropic-api-key:
-    description: 'Anthropic API key for LLM analysis'
-    required: true
-  repo:
-    description: 'Target repository (owner/repo)'
+    description: 'Anthropic API key for LLM-powered analysis (T2/T3 tiers)'
     required: false
+    default: ''
+  repo:
+    description: 'Target repository in owner/repo format. Defaults to current repository.'
+    required: false
+    default: ''
+  cost-cap:
+    description: 'Maximum LLM cost in USD per bark run'
+    required: false
+    default: '50'
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.12'
+
 runs:
   using: 'composite'
   steps:
-    - run: pip install collie
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install Collie
       shell: bash
-    - run: collie bark ${{ inputs.repo || github.repository }}
+      run: pip install collie
+
+    - name: Run Collie Bark
       shell: bash
+      run: |
+        REPO="${{ inputs.repo }}"
+        if [ -z "$REPO" ]; then
+          REPO="${{ github.repository }}"
+        fi
+        collie bark "$REPO" --cost-cap "${{ inputs.cost-cap }}"
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
