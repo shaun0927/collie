@@ -40,6 +40,7 @@ pip install collie
 # Set up authentication
 export GITHUB_TOKEN=ghp_your_token_here
 export ANTHROPIC_API_KEY=sk-ant-your_key_here  # Optional: enables AI analysis
+# Or just install Codex CLI — Collie auto-detects it (no API key needed)
 
 # Teach Collie your merge philosophy
 collie sit owner/repo
@@ -195,7 +196,7 @@ Create `~/.collie/config.yaml` to avoid setting environment variables every time
 
 ```yaml
 github_token: ghp_your_token_here
-anthropic_api_key: sk-ant-your_key_here
+anthropic_api_key: sk-ant-your_key_here  # optional if using Codex CLI
 default_repo: owner/repo
 ```
 
@@ -213,7 +214,12 @@ chmod 600 ~/.collie/config.yaml
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `GITHUB_TOKEN` | Yes | GitHub PAT with repo + discussion write access |
-| `ANTHROPIC_API_KEY` | No | Enables AI analysis (T2/T3). Without it, only T1 rule-based scanning works |
+| `ANTHROPIC_API_KEY` | No | Enables AI analysis (T2/T3) via Anthropic API |
+
+> **Multiple LLM backends:** Collie auto-detects the best available backend:
+> 1. `ANTHROPIC_API_KEY` set → uses **Anthropic API** (Claude)
+> 2. `codex` CLI installed → uses **Codex** (OpenAI, OAuth-based, no API key needed)
+> 3. Neither → T1 rule-based scanning only (still useful, just no AI summary)
 
 ### Philosophy Tuning
 
@@ -238,7 +244,7 @@ A: Only after you `collie unleash` and explicitly `collie approve`. Collie never
 A: Two safety layers: (1) merge is only recommended for fully analyzed PRs, (2) you must approve before execution. `collie reject -r "reason"` feeds back into the philosophy so the same mistake doesn't happen twice.
 
 **Q: How much does it cost to run?**
-A: T1 analysis is free. T2/T3 use the Anthropic API. A typical 500-item repo costs $10-50 per full scan. Daily incremental runs are much cheaper (~$1-5).
+A: T1 analysis is free. T2/T3 use an LLM (Anthropic API or Codex CLI). With the Anthropic API, a typical 500-item repo costs $10-50 per full scan; daily incremental runs are ~$1-5. With Codex CLI (OAuth), there's no direct API cost.
 
 **Q: Does it work with private repos?**
 A: Yes, as long as your `GITHUB_TOKEN` has access to the repo and Discussions are enabled.
