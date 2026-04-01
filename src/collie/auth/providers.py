@@ -16,10 +16,16 @@ class GitHubAuth:
 
     @classmethod
     def from_env(cls) -> "GitHubAuth":
-        """Auto-detect GitHub token: GITHUB_TOKEN > gh CLI."""
+        """Auto-detect GitHub token: GITHUB_TOKEN > config.yaml > gh CLI."""
         token = os.environ.get("GITHUB_TOKEN")
         if token:
             return cls(token)
+        # Try config.yaml
+        from collie.config import load_config
+
+        cfg = load_config()
+        if cfg.github_token:
+            return cls(cfg.github_token)
         # Try gh CLI
         try:
             result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
@@ -29,7 +35,8 @@ class GitHubAuth:
             pass
         raise AuthError(
             "GitHub token not found.\n"
-            "Set GITHUB_TOKEN environment variable or install gh CLI and run 'gh auth login'.\n"
+            "Set GITHUB_TOKEN environment variable, add it to ~/.collie/config.yaml,\n"
+            "or install gh CLI and run 'gh auth login'.\n"
             "  export GITHUB_TOKEN=ghp_your_token_here"
         )
 
@@ -41,13 +48,19 @@ class LLMAuth:
 
     @classmethod
     def from_env(cls) -> "LLMAuth":
-        """Auto-detect LLM API key: ANTHROPIC_API_KEY."""
+        """Auto-detect LLM API key: ANTHROPIC_API_KEY > config.yaml."""
         key = os.environ.get("ANTHROPIC_API_KEY")
         if key:
             return cls(key, "anthropic")
+        # Try config.yaml
+        from collie.config import load_config
+
+        cfg = load_config()
+        if cfg.anthropic_api_key:
+            return cls(cfg.anthropic_api_key, "anthropic")
         raise AuthError(
             "Anthropic API key not found.\n"
-            "Set ANTHROPIC_API_KEY environment variable.\n"
+            "Set ANTHROPIC_API_KEY environment variable or add it to ~/.collie/config.yaml.\n"
             "  export ANTHROPIC_API_KEY=sk-ant-your_key_here\n"
             "Get your key at: https://console.anthropic.com/settings/keys"
         )

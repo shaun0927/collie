@@ -3,6 +3,7 @@
 import pytest
 
 from collie.auth import AuthError, GitHubAuth, LLMAuth
+from collie.config import CollieConfig
 
 
 def test_github_auth_from_env(monkeypatch):
@@ -13,6 +14,7 @@ def test_github_auth_from_env(monkeypatch):
 
 def test_github_auth_missing(monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr("collie.config.load_config", lambda: CollieConfig())
     # Patch subprocess.run to simulate gh CLI not being available
     import subprocess
 
@@ -46,6 +48,7 @@ def test_llm_auth_from_env(monkeypatch):
 
 def test_llm_auth_missing(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("collie.config.load_config", lambda: CollieConfig())
     with pytest.raises(AuthError, match="Anthropic API key not found"):
         LLMAuth.from_env()
 
