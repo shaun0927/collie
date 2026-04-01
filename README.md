@@ -228,21 +228,24 @@ chmod 600 ~/.collie/config.yaml
 
 Collie works with virtually any LLM provider. It auto-detects the best available backend:
 
-| Provider | Setup | Model |
-|----------|-------|-------|
-| **Anthropic** | `export ANTHROPIC_API_KEY=sk-ant-...` | Claude Sonnet |
-| **OpenAI** | `export OPENAI_API_KEY=sk-...` | GPT-4o |
-| **Google Gemini** | `export LLM_PROVIDER=gemini LLM_API_KEY=...` | Gemini 2.5 Flash |
-| **Groq** | `export LLM_PROVIDER=groq LLM_API_KEY=...` | Llama 3.3 70B |
-| **Together** | `export LLM_PROVIDER=together LLM_API_KEY=...` | Llama 3.3 70B |
-| **Mistral** | `export LLM_PROVIDER=mistral LLM_API_KEY=...` | Mistral Large |
-| **DeepSeek** | `export LLM_PROVIDER=deepseek LLM_API_KEY=...` | DeepSeek Chat |
-| **Ollama** (local) | `export LLM_PROVIDER=ollama` | Llama 3.1 (no key needed) |
-| **Codex CLI** | Install `codex` CLI | o3 (OAuth, no key needed) |
-| **Custom** | `export LLM_PROVIDER=custom LLM_BASE_URL=... LLM_API_KEY=...` | Any OpenAI-compatible |
+| Provider | Setup | Default Model |
+|----------|-------|---------------|
+| **Anthropic** | `export ANTHROPIC_API_KEY=sk-ant-...` | `claude-sonnet-4-6` |
+| **OpenAI** | `export OPENAI_API_KEY=sk-...` | `gpt-4o` |
+| **Google Gemini** | `export LLM_PROVIDER=gemini LLM_API_KEY=...` | `gemini-2.5-flash` |
+| **Groq** | `export LLM_PROVIDER=groq LLM_API_KEY=...` | `llama-3.3-70b-versatile` |
+| **Together AI** | `export LLM_PROVIDER=together LLM_API_KEY=...` | `Llama-4-Maverick` |
+| **Mistral** | `export LLM_PROVIDER=mistral LLM_API_KEY=...` | `mistral-large-latest` |
+| **DeepSeek** | `export LLM_PROVIDER=deepseek LLM_API_KEY=...` | `deepseek-chat` |
+| **xAI (Grok)** | `export LLM_PROVIDER=xai LLM_API_KEY=...` | `grok-3` |
+| **Perplexity** | `export LLM_PROVIDER=perplexity LLM_API_KEY=...` | `sonar-pro` |
+| **Fireworks AI** | `export LLM_PROVIDER=fireworks LLM_API_KEY=...` | `llama-v3p1-8b-instruct` |
+| **Ollama** (local) | `export LLM_PROVIDER=ollama` | `llama3.1` (no key needed) |
+| **Codex CLI** | Install `codex` CLI | `o3` (OAuth, no key needed) |
+| **Custom** | `export LLM_BASE_URL=... LLM_API_KEY=...` | Any OpenAI-compatible |
 | _None_ | — | T1 rule-based scanning only |
 
-Override the default model with `LLM_MODEL=your-model-name`, or set it in `~/.collie/config.yaml`.
+All default models use **stable aliases** that auto-upgrade with provider updates. Override anytime with `LLM_MODEL=your-model`, or set `llm_model` in `~/.collie/config.yaml`.
 
 ### Philosophy Tuning
 

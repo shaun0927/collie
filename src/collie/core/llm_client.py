@@ -1,18 +1,97 @@
-"""LLM client wrapper — supports Anthropic, OpenAI-compatible APIs, and Codex CLI."""
+"""LLM client wrapper — supports Anthropic, OpenAI-compatible APIs, and Codex CLI.
+
+Provider registry lives in PROVIDERS dict. To add a provider or update a model,
+edit that single dict — no other code changes needed.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import shutil
 import subprocess
+from dataclasses import dataclass
 
 import httpx
 
+# ── Provider Registry ────────────────────────────────────────────────────────
+# Each entry maps a provider slug to its config. Use stable model aliases
+# that auto-upgrade (e.g., "gpt-4o" not "gpt-4o-2024-08-06") so the code
+# doesn't break when providers release new model versions.
+#
+# To add a new provider: add one entry here. That's it.
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    base_url: str
+    default_model: str
+    env_key: str  # expected env var name for API key
+
+
+PROVIDERS: dict[str, ProviderConfig] = {
+    "openai": ProviderConfig(
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-4o",
+        env_key="OPENAI_API_KEY",
+    ),
+    "gemini": ProviderConfig(
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        default_model="gemini-2.5-flash",
+        env_key="GEMINI_API_KEY",
+    ),
+    "groq": ProviderConfig(
+        base_url="https://api.groq.com/openai/v1",
+        default_model="llama-3.3-70b-versatile",
+        env_key="GROQ_API_KEY",
+    ),
+    "together": ProviderConfig(
+        base_url="https://api.together.xyz/v1",
+        default_model="meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+        env_key="TOGETHER_API_KEY",
+    ),
+    "mistral": ProviderConfig(
+        base_url="https://api.mistral.ai/v1",
+        default_model="mistral-large-latest",
+        env_key="MISTRAL_API_KEY",
+    ),
+    "deepseek": ProviderConfig(
+        base_url="https://api.deepseek.com/v1",
+        default_model="deepseek-chat",
+        env_key="DEEPSEEK_API_KEY",
+    ),
+    "xai": ProviderConfig(
+        base_url="https://api.x.ai/v1",
+        default_model="grok-3",
+        env_key="XAI_API_KEY",
+    ),
+    "perplexity": ProviderConfig(
+        base_url="https://api.perplexity.ai",
+        default_model="sonar-pro",
+        env_key="PERPLEXITY_API_KEY",
+    ),
+    "fireworks": ProviderConfig(
+        base_url="https://api.fireworks.ai/inference/v1",
+        default_model="accounts/fireworks/models/llama-v3p1-8b-instruct",
+        env_key="FIREWORKS_API_KEY",
+    ),
+    "ollama": ProviderConfig(
+        base_url="http://localhost:11434/v1",
+        default_model="llama3.1",
+        env_key="",  # no key needed
+    ),
+}
+
+# Anthropic defaults (uses native SDK, not OpenAI-compatible)
+ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-6"
+
+
+# ── Clients ──────────────────────────────────────────────────────────────────
+
 
 class LLMClient:
-    """Anthropic API client."""
+    """Anthropic API client (native SDK)."""
 
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6"):
+    def __init__(self, api_key: str, model: str = ANTHROPIC_DEFAULT_MODEL):
         self.api_key = api_key
         self.model = model
         self._client = None
@@ -44,35 +123,12 @@ class LLMClient:
 class OpenAICompatibleClient:
     """Generic OpenAI-compatible API client.
 
-    Works with: OpenAI, Google Gemini, Azure OpenAI, Ollama, Groq,
-    Together, Mistral, DeepSeek, vLLM, LM Studio, and any provider
-    that supports the /v1/chat/completions endpoint.
+    Works with any provider that supports POST /chat/completions.
+    See PROVIDERS dict for pre-configured providers.
     """
 
-    # Well-known provider base URLs (user can override via LLM_BASE_URL)
-    KNOWN_PROVIDERS = {
-        "openai": "https://api.openai.com/v1",
-        "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "azure": None,  # requires custom base_url
-        "groq": "https://api.groq.com/openai/v1",
-        "together": "https://api.together.xyz/v1",
-        "mistral": "https://api.mistral.ai/v1",
-        "deepseek": "https://api.deepseek.com/v1",
-        "ollama": "http://localhost:11434/v1",
-    }
-
-    DEFAULT_MODELS = {
-        "openai": "gpt-4o",
-        "gemini": "gemini-2.5-flash",
-        "groq": "llama-3.3-70b-versatile",
-        "together": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-        "mistral": "mistral-large-latest",
-        "deepseek": "deepseek-chat",
-        "ollama": "llama3.1",
-    }
-
-    def __init__(self, api_key: str, base_url: str, model: str | None = None, provider: str | None = None):
-        self.model = model or self.DEFAULT_MODELS.get(provider or "", "gpt-4o")
+    def __init__(self, api_key: str, base_url: str, model: str):
+        self.model = model
         self._client = httpx.AsyncClient(
             base_url=base_url,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -110,7 +166,6 @@ class CodexLLMClient:
 
     async def chat(self, system: str, user: str, max_tokens: int = 2000) -> str:
         """Send a prompt via codex exec and return the response."""
-        # Truncate to avoid oversized prompts
         system_short = system[:1000] if len(system) > 1000 else system
         user_short = user[:2000] if len(user) > 2000 else user
         prompt = f"{system_short}\n\n---\n\n{user_short}"
@@ -133,18 +188,23 @@ class CodexLLMClient:
         pass
 
 
+# ── Factory ──────────────────────────────────────────────────────────────────
+
+
 def create_llm_client() -> LLMClient | OpenAICompatibleClient | CodexLLMClient | None:
     """Auto-detect and create the best available LLM client.
 
     Priority:
       1. LLM_PROVIDER + LLM_API_KEY  (explicit provider selection)
-      2. ANTHROPIC_API_KEY            (Anthropic API)
-      3. OPENAI_API_KEY               (OpenAI API)
+      2. ANTHROPIC_API_KEY            (Anthropic native SDK)
+      3. OPENAI_API_KEY               (OpenAI via compatible client)
       4. Codex CLI                    (OAuth, no key needed)
       5. None                         (T1 rule-based only)
 
     Environment variables:
-      LLM_PROVIDER:  anthropic | openai | gemini | groq | together | mistral | deepseek | ollama
+      LLM_PROVIDER:  anthropic | openai | gemini | groq | together |
+                     mistral | deepseek | xai | perplexity | fireworks |
+                     ollama | codex
       LLM_API_KEY:   API key for the chosen provider
       LLM_BASE_URL:  Custom base URL (overrides provider default)
       LLM_MODEL:     Model name (overrides provider default)
@@ -156,34 +216,47 @@ def create_llm_client() -> LLMClient | OpenAICompatibleClient | CodexLLMClient |
     base_url = os.environ.get("LLM_BASE_URL", "")
     model = os.environ.get("LLM_MODEL", "")
 
-    # 1. Explicit provider selection
+    # 1. Explicit provider
     if provider:
         if provider == "anthropic":
             key = llm_key or os.environ.get("ANTHROPIC_API_KEY", "")
             if key:
-                return LLMClient(key, model=model or "claude-sonnet-4-6")
+                return LLMClient(key, model=model or ANTHROPIC_DEFAULT_MODEL)
         elif provider == "codex":
             if shutil.which("codex"):
                 return CodexLLMClient(model=model or "o3")
+        elif provider in PROVIDERS:
+            cfg = PROVIDERS[provider]
+            key = llm_key or os.environ.get(cfg.env_key, "")
+            url = base_url or cfg.base_url
+            if key or not cfg.env_key:  # ollama needs no key
+                return OpenAICompatibleClient(
+                    api_key=key or "ollama",
+                    base_url=url,
+                    model=model or cfg.default_model,
+                )
         else:
-            key = llm_key or os.environ.get(f"{provider.upper()}_API_KEY", "")
-            url = base_url or OpenAICompatibleClient.KNOWN_PROVIDERS.get(provider, "")
-            if key and url:
-                return OpenAICompatibleClient(api_key=key, base_url=url, model=model or None, provider=provider)
+            # Unknown provider — use as custom OpenAI-compatible endpoint
+            if llm_key and base_url:
+                return OpenAICompatibleClient(
+                    api_key=llm_key,
+                    base_url=base_url,
+                    model=model or "default",
+                )
 
     # 2. Anthropic API key
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if api_key:
-        return LLMClient(api_key, model=model or "claude-sonnet-4-6")
+        return LLMClient(api_key, model=model or ANTHROPIC_DEFAULT_MODEL)
 
     # 3. OpenAI API key
     openai_key = os.environ.get("OPENAI_API_KEY")
     if openai_key:
+        cfg = PROVIDERS["openai"]
         return OpenAICompatibleClient(
             api_key=openai_key,
-            base_url="https://api.openai.com/v1",
-            model=model or "gpt-4o",
-            provider="openai",
+            base_url=cfg.base_url,
+            model=model or cfg.default_model,
         )
 
     # 4. Codex CLI
