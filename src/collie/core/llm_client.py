@@ -1,6 +1,10 @@
-"""LLM client wrapper for Anthropic API."""
+"""LLM client wrapper — supports Anthropic API and Codex CLI backends."""
 
 from __future__ import annotations
+
+import asyncio
+import shutil
+import subprocess
 
 
 class LLMClient:
@@ -33,3 +37,50 @@ class LLMClient:
         if self._client:
             await self._client.close()
             self._client = None
+
+
+class CodexLLMClient:
+    """LLM client that uses Codex CLI (OAuth-based, no API key needed)."""
+
+    def __init__(self, model: str = "o3"):
+        self.model = model
+        if not shutil.which("codex"):
+            raise RuntimeError("Codex CLI not found. Install it or use ANTHROPIC_API_KEY instead.")
+
+    async def chat(self, system: str, user: str, max_tokens: int = 2000) -> str:
+        """Send a prompt via codex exec and return the response."""
+        prompt = f"{system}\n\n---\n\n{user}"
+
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ["codex", "exec", "--full-auto", prompt],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        if result.returncode != 0:
+            error = result.stderr.strip() or "Unknown codex error"
+            raise RuntimeError(f"Codex exec failed: {error}")
+
+        return result.stdout.strip()
+
+    async def close(self):
+        pass
+
+
+def create_llm_client() -> LLMClient | CodexLLMClient | None:
+    """Auto-detect and create the best available LLM client.
+
+    Priority: ANTHROPIC_API_KEY > Codex CLI > None
+    """
+    import os
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if api_key:
+        return LLMClient(api_key)
+
+    if shutil.which("codex"):
+        return CodexLLMClient()
+
+    return None
