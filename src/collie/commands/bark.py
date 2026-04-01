@@ -53,9 +53,13 @@ class BarkPipeline:
         self.llm = llm_client
         self.incremental = IncrementalManager(graphql, queue_store, philosophy_store)
 
-    async def run(self, owner: str, repo: str, cost_cap: float = 50.0) -> BarkReport:
+    async def run(self, owner: str, repo: str, cost_cap: float = 50.0, progress_callback=None) -> BarkReport:
         """Execute full bark pipeline."""
         from collie.core.analyzer import IssueAnalyzer, T1Scanner, T2Summarizer, T3Reviewer
+
+        async def _notify(msg: str):
+            if progress_callback:
+                await progress_callback(msg)
 
         cost = CostTracker(cap_usd=cost_cap)
         t1 = T1Scanner()
@@ -64,6 +68,7 @@ class BarkPipeline:
         issue_analyzer = IssueAnalyzer(self.llm)
 
         # Load philosophy
+        await _notify(f"Loading philosophy for {owner}/{repo}...")
         philosophy = await self.philosophy_store.load(owner, repo)
         if philosophy is None:
             raise ValueError("No philosophy found. Run 'collie sit' first.")
@@ -79,20 +84,25 @@ class BarkPipeline:
         # Separate PRs and Issues
         prs = [i for i in items if "additions" in i]
         issues = [i for i in items if "additions" not in i]
+        total = len(items)
+        await _notify(f"Found {total} items to analyze ({len(prs)} PRs, {len(issues)} issues)")
 
         recommendations: list[Recommendation] = []
 
         # Analyze PRs: T1 -> T2 -> T3
-        for item in prs:
+        for i, item in enumerate(prs):
+            await _notify(f"Analyzing PR {i + 1}/{len(prs)}: #{item['number']} {item.get('title', '')[:50]}")
             rec = await self._analyze_pr(item, philosophy, t1, t2, t3, cost)
             recommendations.append(rec)
 
         # Analyze Issues
-        for issue in issues:
+        for i, issue in enumerate(issues):
+            await _notify(f"Analyzing issue {i + 1}/{len(issues)}: #{issue['number']} {issue.get('title', '')[:50]}")
             rec = await self._analyze_issue(issue, philosophy, issue_analyzer, cost, prs)
             recommendations.append(rec)
 
         # Update queue
+        await _notify(f"Updating discussion queue with {len(recommendations)} recommendations...")
         await self.queue_store.upsert_recommendations(owner, repo, recommendations)
 
         # Detect approvals and execute (cron mode)
