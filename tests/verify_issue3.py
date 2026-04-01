@@ -11,6 +11,8 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import httpx
@@ -18,6 +20,19 @@ import httpx
 from collie.auth.providers import AuthError, GitHubAuth, LLMAuth
 from collie.github.graphql import GitHubGraphQL
 from collie.github.rest import _RETRY_STATUSES, GitHubREST, _request_with_retry
+
+
+def _has_token():
+    if os.environ.get("GITHUB_TOKEN"):
+        return True
+    try:
+        r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+        return bool(r.stdout.strip())
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+pytestmark = pytest.mark.skipif(not _has_token(), reason="No GitHub token — integration test")
 
 OWNER = "shaun0927"
 REPO = "collie"
