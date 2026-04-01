@@ -361,14 +361,14 @@ async def test_checkbox_10_bark_without_api_key():
     from collie.core.analyzer import T2Summarizer, T3Reviewer
 
     # Check T2Summarizer behavior without LLM
-    T2Summarizer(llm=None)
-    t2_source = inspect.getsource(T2Summarizer.analyze)
+    T2Summarizer(llm_client=None)
+    t2_source = inspect.getsource(T2Summarizer.summarize)
     t2_handles_none = "self.llm is None" in t2_source or "not self.llm" in t2_source
     print(f"  T2Summarizer handles None LLM: {t2_handles_none}")
 
     # Check T3Reviewer behavior without LLM
-    T3Reviewer(llm=None)
-    t3_source = inspect.getsource(T3Reviewer.analyze)
+    T3Reviewer(llm_client=None)
+    t3_source = inspect.getsource(T3Reviewer.review)
     t3_handles_none = "self.llm is None" in t3_source or "not self.llm" in t3_source
     print(f"  T3Reviewer handles None LLM: {t3_handles_none}")
 
