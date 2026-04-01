@@ -4,11 +4,8 @@ import asyncio
 import json
 import os
 import subprocess
-import sys
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 
 def _has_token():
@@ -400,16 +397,17 @@ async def test_checkbox_11_error_messages():
 
     # Test 1: Missing token
     original = os.environ.get("GITHUB_TOKEN", "")
-    os.environ["GITHUB_TOKEN"] = ""
-    # Also temporarily hide gh CLI
-    _original_path = os.environ.get("PATH", "")
+    try:
+        os.environ["GITHUB_TOKEN"] = ""
+        # Also temporarily hide gh CLI
+        _original_path = os.environ.get("PATH", "")
 
-    result = await call_tool("collie_status", {"owner": "test", "repo": "test"})
-    text = result[0].text
-    print(f"  No token error: '{text}'")
-    is_readable_1 = "error" in text.lower() and "token" in text.lower()
-
-    os.environ["GITHUB_TOKEN"] = original
+        result = await call_tool("collie_status", {"owner": "test", "repo": "test"})
+        text = result[0].text
+        print(f"  No token error: '{text}'")
+        is_readable_1 = "error" in text.lower() and "token" in text.lower()
+    finally:
+        os.environ["GITHUB_TOKEN"] = original
 
     # Test 2: Invalid tool name
     result2 = await call_tool("collie_nonexistent", {"owner": "test", "repo": "test"})

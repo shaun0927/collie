@@ -71,24 +71,26 @@ async def test_approve_single_item():
     from collie.core.stores.queue_store import QueueStore
 
     gql, rest = await _make_clients()
-    await _ensure_active(gql, rest)
-    phil_store = PhilosophyStore(gql, rest)
-    queue_store = QueueStore(gql, rest)
+    try:
+        await _ensure_active(gql, rest)
+        phil_store = PhilosophyStore(gql, rest)
+        queue_store = QueueStore(gql, rest)
 
-    cmd = ApproveCommand(rest, queue_store, phil_store)
-    # Use PR #6 which is a real open PR
-    report = await cmd.approve(OWNER, REPO, numbers=[6])
+        cmd = ApproveCommand(rest, queue_store, phil_store)
+        # Use PR #6 which is a real open PR
+        report = await cmd.approve(OWNER, REPO, numbers=[6])
 
-    # Should return an ExecutionReport with results
-    assert report is not None
-    assert len(report.results) == 1
-    result = report.results[0]
-    assert result.number == 6
-    # Either succeeded (merged) or failed (which is valid - shows execution was attempted)
-    assert result.status.value in ("success", "failed")
-    assert result.message  # Has a message
-    await gql.close()
-    await rest.close()
+        # Should return an ExecutionReport with results
+        assert report is not None
+        assert len(report.results) == 1
+        result = report.results[0]
+        assert result.number == 6
+        # Either succeeded (merged) or failed (which is valid - shows execution was attempted)
+        assert result.status.value in ("success", "failed")
+        assert result.message  # Has a message
+    finally:
+        await gql.close()
+        await rest.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -104,19 +106,21 @@ async def test_approve_multiple_items():
     from collie.core.stores.queue_store import QueueStore
 
     gql, rest = await _make_clients()
-    phil_store = PhilosophyStore(gql, rest)
-    queue_store = QueueStore(gql, rest)
+    try:
+        phil_store = PhilosophyStore(gql, rest)
+        queue_store = QueueStore(gql, rest)
 
-    cmd = ApproveCommand(rest, queue_store, phil_store)
-    # Use PRs #7 and #8
-    report = await cmd.approve(OWNER, REPO, numbers=[7, 8])
+        cmd = ApproveCommand(rest, queue_store, phil_store)
+        # Use PRs #7 and #8
+        report = await cmd.approve(OWNER, REPO, numbers=[7, 8])
 
-    assert report is not None
-    assert len(report.results) == 2
-    numbers_in_report = {r.number for r in report.results}
-    assert numbers_in_report == {7, 8}
-    await gql.close()
-    await rest.close()
+        assert report is not None
+        assert len(report.results) == 2
+        numbers_in_report = {r.number for r in report.results}
+        assert numbers_in_report == {7, 8}
+    finally:
+        await gql.close()
+        await rest.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -132,22 +136,24 @@ async def test_approve_all():
     from collie.core.stores.queue_store import QueueStore
 
     gql, rest = await _make_clients()
-    phil_store = PhilosophyStore(gql, rest)
-    queue_store = QueueStore(gql, rest)
+    try:
+        phil_store = PhilosophyStore(gql, rest)
+        queue_store = QueueStore(gql, rest)
 
-    cmd = ApproveCommand(rest, queue_store, phil_store)
-    # --all with no queue items should return empty report (not crash)
-    report = await cmd.approve(OWNER, REPO, approve_all=True)
-    assert report is not None
-    # May be empty if no checked checkboxes in queue, that's valid
-    assert hasattr(report, "results")
-    assert hasattr(report, "summary")
-    summary = report.summary()
-    assert "succeeded" in summary
-    assert "failed" in summary
-    assert "skipped" in summary
-    await gql.close()
-    await rest.close()
+        cmd = ApproveCommand(rest, queue_store, phil_store)
+        # --all with no queue items should return empty report (not crash)
+        report = await cmd.approve(OWNER, REPO, approve_all=True)
+        assert report is not None
+        # May be empty if no checked checkboxes in queue, that's valid
+        assert hasattr(report, "results")
+        assert hasattr(report, "summary")
+        summary = report.summary()
+        assert "succeeded" in summary
+        assert "failed" in summary
+        assert "skipped" in summary
+    finally:
+        await gql.close()
+        await rest.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -163,20 +169,22 @@ async def test_reject_with_reason():
     from collie.core.stores.queue_store import QueueStore
 
     gql, rest = await _make_clients()
-    phil_store = PhilosophyStore(gql, rest)
-    queue_store = QueueStore(gql, rest)
+    try:
+        phil_store = PhilosophyStore(gql, rest)
+        queue_store = QueueStore(gql, rest)
 
-    cmd = ShakeHandsCommand(phil_store, queue_store)
-    result = await cmd.micro_update(OWNER, REPO, "vendor lock-in risk", 3)
+        cmd = ShakeHandsCommand(phil_store, queue_store)
+        result = await cmd.micro_update(OWNER, REPO, "vendor lock-in risk", 3)
 
-    assert result is not None
-    assert "suggestion" in result
-    assert result["suggestion"]  # Non-empty suggestion
-    assert "vendor" in result["suggestion"].lower() or "lock-in" in result["suggestion"].lower()
-    assert result["applied"] is False  # Not auto-applied
-    assert "rule" in result  # Contains rule dict for optional application
-    await gql.close()
-    await rest.close()
+        assert result is not None
+        assert "suggestion" in result
+        assert result["suggestion"]  # Non-empty suggestion
+        assert "vendor" in result["suggestion"].lower() or "lock-in" in result["suggestion"].lower()
+        assert result["applied"] is False  # Not auto-applied
+        assert "rule" in result  # Contains rule dict for optional application
+    finally:
+        await gql.close()
+        await rest.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -192,24 +200,26 @@ async def test_rejection_triggers_micro_update():
     from collie.core.stores.queue_store import QueueStore
 
     gql, rest = await _make_clients()
-    phil_store = PhilosophyStore(gql, rest)
-    queue_store = QueueStore(gql, rest)
+    try:
+        phil_store = PhilosophyStore(gql, rest)
+        queue_store = QueueStore(gql, rest)
 
-    cmd = ShakeHandsCommand(phil_store, queue_store)
-    result = await cmd.micro_update(OWNER, REPO, "security vulnerability in deps", 4)
+        cmd = ShakeHandsCommand(phil_store, queue_store)
+        result = await cmd.micro_update(OWNER, REPO, "security vulnerability in deps", 4)
 
-    # micro_update returns a suggestion with rule structure
-    assert result["suggestion"]
-    assert result["rule"]["type"] in ("hard_rule", "escalation")
-    # Security-related reason should suggest escalation
-    assert result["rule"]["type"] == "escalation"
-    assert result["rule"]["action"] == "escalate"
+        # micro_update returns a suggestion with rule structure
+        assert result["suggestion"]
+        assert result["rule"]["type"] in ("hard_rule", "escalation")
+        # Security-related reason should suggest escalation
+        assert result["rule"]["type"] == "escalation"
+        assert result["rule"]["action"] == "escalate"
 
-    # Verify apply_micro_update would work (but don't actually apply to keep tests independent)
-    rule = result["rule"]
-    assert "pattern" in rule or "condition" in rule
-    await gql.close()
-    await rest.close()
+        # Verify apply_micro_update would work (but don't actually apply to keep tests independent)
+        rule = result["rule"]
+        assert "pattern" in rule or "condition" in rule
+    finally:
+        await gql.close()
+        await rest.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -225,25 +235,27 @@ async def test_mcp_approve_tool():
     from collie.mcp.server import _dispatch
 
     gql, rest = await _make_clients()
-    phil_store = PhilosophyStore(gql, rest)
-    queue_store = QueueStore(gql, rest)
+    try:
+        phil_store = PhilosophyStore(gql, rest)
+        queue_store = QueueStore(gql, rest)
 
-    # Call the MCP dispatch directly (simulates MCP tool call)
-    result = await _dispatch(
-        "collie_approve",
-        {"owner": OWNER, "repo": REPO, "numbers": [3], "approve_all": False},
-        gql,
-        rest,
-        phil_store,
-        queue_store,
-    )
+        # Call the MCP dispatch directly (simulates MCP tool call)
+        result = await _dispatch(
+            "collie_approve",
+            {"owner": OWNER, "repo": REPO, "numbers": [3], "approve_all": False},
+            gql,
+            rest,
+            phil_store,
+            queue_store,
+        )
 
-    assert isinstance(result, str)
-    assert "succeeded" in result
-    assert "failed" in result
-    assert "skipped" in result
-    await gql.close()
-    await rest.close()
+        assert isinstance(result, str)
+        assert "succeeded" in result
+        assert "failed" in result
+        assert "skipped" in result
+    finally:
+        await gql.close()
+        await rest.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -259,23 +271,25 @@ async def test_mcp_reject_tool():
     from collie.mcp.server import _dispatch
 
     gql, rest = await _make_clients()
-    phil_store = PhilosophyStore(gql, rest)
-    queue_store = QueueStore(gql, rest)
+    try:
+        phil_store = PhilosophyStore(gql, rest)
+        queue_store = QueueStore(gql, rest)
 
-    result = await _dispatch(
-        "collie_reject",
-        {"owner": OWNER, "repo": REPO, "number": 4, "reason": "vendor lock-in"},
-        gql,
-        rest,
-        phil_store,
-        queue_store,
-    )
+        result = await _dispatch(
+            "collie_reject",
+            {"owner": OWNER, "repo": REPO, "number": 4, "reason": "vendor lock-in"},
+            gql,
+            rest,
+            phil_store,
+            queue_store,
+        )
 
-    assert isinstance(result, str)
-    assert "Rejected #4" in result
-    assert "Suggestion:" in result or "suggestion" in result.lower()
-    await gql.close()
-    await rest.close()
+        assert isinstance(result, str)
+        assert "Rejected #4" in result
+        assert "Suggestion:" in result or "suggestion" in result.lower()
+    finally:
+        await gql.close()
+        await rest.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
