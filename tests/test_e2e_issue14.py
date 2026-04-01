@@ -5,7 +5,6 @@ Run: python tests/test_e2e_issue14.py
 """
 
 import asyncio
-import json
 import subprocess
 import time
 import traceback
@@ -32,6 +31,7 @@ def record(checkbox: str, passed: bool, detail: str = ""):
 # ── Helpers ──────────────────────────────────────────────────────────
 async def create_clients():
     from collie.github import GitHubGraphQL, GitHubREST
+
     token = gh_token()
     gql = GitHubGraphQL(token)
     rest = GitHubREST(token)
@@ -92,10 +92,12 @@ async def scenario_a():
 
         analyzer = RepoAnalyzer(rest)
         profile = await analyzer.analyze(OWNER, REPO)
-        print(f"  Repo profile: contributing={profile.has_contributing}, "
-              f"PR template={profile.has_pr_template}, "
-              f"CI={bool(profile.ci_workflows)}, "
-              f"CODEOWNERS={profile.has_codeowners}")
+        print(
+            f"  Repo profile: contributing={profile.has_contributing}, "
+            f"PR template={profile.has_pr_template}, "
+            f"CI={bool(profile.ci_workflows)}, "
+            f"CODEOWNERS={profile.has_codeowners}"
+        )
 
         philosophy = Philosophy(
             hard_rules=[
@@ -123,9 +125,11 @@ async def scenario_a():
         assert loaded is not None, "Philosophy should load back"
         assert loaded.mode == Mode.TRAINING, f"Mode should be training, got {loaded.mode}"
         assert len(loaded.hard_rules) == 2, f"Should have 2 hard rules, got {len(loaded.hard_rules)}"
-        print(f"  Philosophy verified: mode={loaded.mode.value}, "
-              f"hard_rules={len(loaded.hard_rules)}, "
-              f"escalation_rules={len(loaded.escalation_rules)}")
+        print(
+            f"  Philosophy verified: mode={loaded.mode.value}, "
+            f"hard_rules={len(loaded.hard_rules)}, "
+            f"escalation_rules={len(loaded.escalation_rules)}"
+        )
 
         # ── Step 2: bark (generate recommendations) ──────────────────
         print("\n--- Step 2: bark (analyze issues/PRs → queue) ---")
@@ -136,8 +140,10 @@ async def scenario_a():
         pipeline = BarkPipeline(gql, rest, phil_store, queue_store, llm)
         report = await pipeline.run(OWNER, REPO, cost_cap=50.0)
 
-        print(f"  Bark complete: {report.total_items} items analyzed "
-              f"({report.prs_analyzed} PRs, {report.issues_analyzed} issues)")
+        print(
+            f"  Bark complete: {report.total_items} items analyzed "
+            f"({report.prs_analyzed} PRs, {report.issues_analyzed} issues)"
+        )
         print(f"  Full scan: {report.full_scan}")
         print(f"  Recommendations: {len(report.recommendations)}")
         for rec in report.recommendations:
@@ -193,10 +199,7 @@ async def scenario_a():
 
         # ── Record results ───────────────────────────────────────────
         flow_ok = (
-            loaded is not None
-            and queue_discussion is not None
-            and len(report.recommendations) > 0
-            and approve_blocked
+            loaded is not None and queue_discussion is not None and len(report.recommendations) > 0 and approve_blocked
         )
         record(
             "A1: pip install → sit → bark → approve full flow completes without errors",
@@ -212,7 +215,8 @@ async def scenario_a():
         record(
             "A2: Philosophy + queue are created correctly in Discussion",
             phil_discussion is not None and queue_discussion is not None,
-            f"Philosophy={'found' if phil_discussion else 'MISSING'}, Queue={'found' if queue_discussion else 'MISSING'}",
+            f"Philosophy={'found' if phil_discussion else 'MISSING'}, "
+            f"Queue={'found' if queue_discussion else 'MISSING'}",
         )
 
         record(
@@ -312,7 +316,7 @@ async def scenario_b():
         # ── Step 4: Verify merge execution mechanics ─────────────────
         # Since there are no open PRs, we verify the executor code path
         print("\n--- Step 4: Verify merge execution code path ---")
-        from collie.core.executor import Executor, ExecutionStatus
+        from collie.core.executor import Executor
         from collie.core.models import ItemType, Recommendation, RecommendationAction
 
         executor = Executor(rest)
@@ -375,16 +379,13 @@ async def scenario_c():
 
         # ── Step 1: Reject with reason → get micro-update suggestion ─
         print("\n--- Step 1: Reject → micro-update suggestion ---")
-        result = await shake_cmd.micro_update(
-            OWNER, REPO, "This introduces a vendor lock-in dependency on AWS", 10
-        )
+        result = await shake_cmd.micro_update(OWNER, REPO, "This introduces a vendor lock-in dependency on AWS", 10)
         print(f"  Suggestion: {result['suggestion']}")
         print(f"  Rule type: {result['rule']['type']}")
         print(f"  Rule condition: {result['rule'].get('condition', 'N/A')}")
 
-        suggestion_reasonable = (
-            result["suggestion"] != ""
-            and ("vendor" in result["suggestion"].lower() or "lock" in result["suggestion"].lower())
+        suggestion_reasonable = result["suggestion"] != "" and (
+            "vendor" in result["suggestion"].lower() or "lock" in result["suggestion"].lower()
         )
 
         record(
@@ -429,6 +430,7 @@ async def scenario_c():
         print("\n--- Step 4: Verify updated philosophy in recommendations ---")
         # Brief pause for GitHub API consistency after rapid Discussion updates
         import asyncio as _aio
+
         await _aio.sleep(2)
         # Verify philosophy is accessible before bark
         phil_check = await phil_store.load(OWNER, REPO)
@@ -488,6 +490,7 @@ async def scenario_d():
         # ── Step 1: Verify GitHub Action workflow exists ──────────────
         print("\n--- Step 1: Verify GitHub Action workflow ---")
         import os
+
         workflow_path = os.path.join(os.path.dirname(__file__), "..", ".github", "workflows", "collie-example.yml")
         workflow_exists = os.path.isfile(os.path.abspath(workflow_path))
 
@@ -504,21 +507,23 @@ async def scenario_d():
             print("  Workflow NOT found!")
 
         # Verify the workflow can be triggered (check via gh CLI)
-        workflow_runnable = False
+        _workflow_runnable = False
         try:
             r = subprocess.run(
                 ["gh", "workflow", "list", "--repo", f"{OWNER}/{REPO}"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             print(f"  Workflows on repo: {r.stdout.strip() or 'none'}")
-            workflow_runnable = workflow_exists and has_schedule and has_dispatch
+            _workflow_runnable = workflow_exists and has_schedule and has_dispatch
         except Exception as e:
             print(f"  Could not list workflows: {e}")
 
         record(
             "D1: bark runs successfully in GitHub Action",
             workflow_exists and has_schedule and has_bark,
-            f"Workflow exists with schedule trigger and bark step",
+            "Workflow exists with schedule trigger and bark step",
         )
 
         # ── Step 2: Verify Discussion checkbox approval detection ────
@@ -777,9 +782,9 @@ async def scenario_a_multi_repo():
     repos_tested = []
     test_repos = [
         ("shaun0927", "collie"),  # Already tested in Scenario A
-        ("pallets", "flask"),     # Medium Python repo
-        ("pallets", "click"),     # Popular Python CLI lib
-        ("pallets", "jinja"),     # Templating library (backup)
+        ("pallets", "flask"),  # Medium Python repo
+        ("pallets", "click"),  # Popular Python CLI lib
+        ("pallets", "jinja"),  # Templating library (backup)
     ]
 
     gql, rest, llm = await create_clients()
@@ -816,7 +821,7 @@ async def scenario_a_multi_repo():
                     repos_tested.append(f"{owner}/{repo}")
                 else:
                     repos_tested.append(f"{owner}/{repo}")
-                    print(f"  No open items, but fetch succeeded")
+                    print("  No open items, but fetch succeeded")
 
             except Exception as e:
                 print(f"  Error on {owner}/{repo}: {e}")

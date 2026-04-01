@@ -43,7 +43,7 @@ async def main():
 
     # ── Setup: clean up any existing test discussions ──
     print("\n🔧 Setup: Cleaning up existing discussions...")
-    delete_mutation = 'mutation($id: ID!) { deleteDiscussion(input: {id: $id}) { discussion { id } } }'
+    delete_mutation = "mutation($id: ID!) { deleteDiscussion(input: {id: $id}) { discussion { id } } }"
     discussions = await gql.list_discussions(OWNER, REPO)
     for d in discussions:
         title = d.get("title", "")
@@ -63,8 +63,11 @@ async def main():
     record("1b_philosophy_saved", bool(url), f"url={url}")
 
     loaded = await phil_store.load(OWNER, REPO)
-    record("1c_loaded_mode_training", loaded is not None and loaded.mode == Mode.TRAINING,
-           f"mode={loaded.mode.value if loaded else 'None'}")
+    record(
+        "1c_loaded_mode_training",
+        loaded is not None and loaded.mode == Mode.TRAINING,
+        f"mode={loaded.mode.value if loaded else 'None'}",
+    )
 
     # ══════════════════════════════════════════════════
     # Checkbox 2: `collie bark` can run in training mode
@@ -73,8 +76,7 @@ async def main():
     try:
         pipeline = BarkPipeline(gql, rest, phil_store, queue_store, llm_client=None)
         report = await pipeline.run(OWNER, REPO, cost_cap=50.0)
-        record("2_bark_in_training", True,
-               f"items={report.total_items}, recs={len(report.recommendations)}")
+        record("2_bark_in_training", True, f"items={report.total_items}, recs={len(report.recommendations)}")
     except Exception as e:
         record("2_bark_in_training", False, str(e))
 
@@ -107,17 +109,23 @@ async def main():
     if queue_disc:
         body = queue_disc.get("body", "")
         has_mode = "Mode: training" in body
-        record("4_queue_mode_training", has_mode,
-               f"header line: {body.splitlines()[1] if len(body.splitlines()) > 1 else 'N/A'}")
+        record(
+            "4_queue_mode_training",
+            has_mode,
+            f"header line: {body.splitlines()[1] if len(body.splitlines()) > 1 else 'N/A'}",
+        )
     else:
         # Queue may not exist if bark found no items; verify the render method directly
         from collie.core.models import ItemType, Recommendation, RecommendationAction
-        test_items = [Recommendation(number=1, item_type=ItemType.PR,
-                                     action=RecommendationAction.HOLD, reason="test")]
+
+        test_items = [Recommendation(number=1, item_type=ItemType.PR, action=RecommendationAction.HOLD, reason="test")]
         rendered = QueueStore._render_queue_markdown(test_items, mode="training")
         has_mode = "Mode: training" in rendered
-        record("4_queue_mode_training", has_mode,
-               f"Verified via _render_queue_markdown (no queue Discussion created — 0 items)")
+        record(
+            "4_queue_mode_training",
+            has_mode,
+            "Verified via _render_queue_markdown (no queue Discussion created — 0 items)",
+        )
 
     # ══════════════════════════════════════════════════
     # Checkbox 5: `collie unleash` switches to active
@@ -132,8 +140,11 @@ async def main():
 
     # Verify persisted
     loaded = await phil_store.load(OWNER, REPO)
-    record("5b_persisted_active", loaded is not None and loaded.mode == Mode.ACTIVE,
-           f"persisted mode={loaded.mode.value if loaded else 'None'}")
+    record(
+        "5b_persisted_active",
+        loaded is not None and loaded.mode == Mode.ACTIVE,
+        f"persisted mode={loaded.mode.value if loaded else 'None'}",
+    )
 
     # Verify double-unleash error
     try:
@@ -168,8 +179,11 @@ async def main():
 
     # Verify persisted
     loaded = await phil_store.load(OWNER, REPO)
-    record("7b_persisted_training", loaded is not None and loaded.mode == Mode.TRAINING,
-           f"persisted mode={loaded.mode.value if loaded else 'None'}")
+    record(
+        "7b_persisted_training",
+        loaded is not None and loaded.mode == Mode.TRAINING,
+        f"persisted mode={loaded.mode.value if loaded else 'None'}",
+    )
 
     # Verify double-leash error
     try:
@@ -186,7 +200,7 @@ async def main():
         report = await mode_cmd.status(OWNER, REPO)
         summary = report.summary()
         has_mode = "Mode: training" in summary
-        record("8_status_shows_mode", has_mode, f"summary contains 'Mode: training'")
+        record("8_status_shows_mode", has_mode, "summary contains 'Mode: training'")
         print(f"    Status output:\n{summary}")
     except Exception as e:
         record("8_status_shows_mode", False, str(e))
@@ -196,7 +210,7 @@ async def main():
     report = await mode_cmd.status(OWNER, REPO)
     summary = report.summary()
     has_active = "Mode: active" in summary
-    record("8b_status_active", has_active, f"summary contains 'Mode: active'")
+    record("8b_status_active", has_active, "summary contains 'Mode: active'")
 
     # ══════════════════════════════════════════════════
     # Checkbox 9: Mode + transition timestamp in Discussion philosophy
@@ -212,13 +226,11 @@ async def main():
     if phil_disc:
         body = phil_disc.get("body", "")
         has_mode_active = "Mode: active" in body
-        record("9a_mode_in_discussion", has_mode_active,
-               f"Discussion body contains 'Mode: active'")
+        record("9a_mode_in_discussion", has_mode_active, "Discussion body contains 'Mode: active'")
 
         # Check for unleashed_at timestamp
         has_unleashed = "Unleashed:" in body
-        record("9b_unleashed_timestamp", has_unleashed,
-               f"Discussion body contains 'Unleashed:' timestamp")
+        record("9b_unleashed_timestamp", has_unleashed, "Discussion body contains 'Unleashed:' timestamp")
 
         if not has_unleashed:
             # This is a known gap: set_mode doesn't set unleashed_at
@@ -235,27 +247,25 @@ async def main():
     await mode_cmd.leash(OWNER, REPO)
 
     from collie.mcp.server import _dispatch
+
     # Test MCP unleash
     try:
-        result = await _dispatch("collie_unleash", {"owner": OWNER, "repo": REPO},
-                                 gql, rest, phil_store, queue_store)
+        result = await _dispatch("collie_unleash", {"owner": OWNER, "repo": REPO}, gql, rest, phil_store, queue_store)
         record("10a_mcp_unleash", "active mode" in result.lower(), f"MCP result: {result}")
     except Exception as e:
         record("10a_mcp_unleash", False, str(e))
 
     # Test MCP leash
     try:
-        result = await _dispatch("collie_leash", {"owner": OWNER, "repo": REPO},
-                                 gql, rest, phil_store, queue_store)
+        result = await _dispatch("collie_leash", {"owner": OWNER, "repo": REPO}, gql, rest, phil_store, queue_store)
         record("10b_mcp_leash", "training mode" in result.lower(), f"MCP result: {result}")
     except Exception as e:
         record("10b_mcp_leash", False, str(e))
 
     # Test MCP status
     try:
-        result = await _dispatch("collie_status", {"owner": OWNER, "repo": REPO},
-                                 gql, rest, phil_store, queue_store)
-        record("10c_mcp_status", "mode:" in result.lower(), f"MCP result contains mode info")
+        result = await _dispatch("collie_status", {"owner": OWNER, "repo": REPO}, gql, rest, phil_store, queue_store)
+        record("10c_mcp_status", "mode:" in result.lower(), "MCP result contains mode info")
     except Exception as e:
         record("10c_mcp_status", False, str(e))
 
@@ -269,15 +279,21 @@ async def main():
 
     # Verify via code inspection + unit test
     loaded = await phil_store.load(OWNER, REPO)
-    record("11a_training_mode_confirmed", loaded is not None and loaded.mode == Mode.TRAINING,
-           f"current mode={loaded.mode.value if loaded else 'None'}")
+    record(
+        "11a_training_mode_confirmed",
+        loaded is not None and loaded.mode == Mode.TRAINING,
+        f"current mode={loaded.mode.value if loaded else 'None'}",
+    )
 
     try:
         pipeline = BarkPipeline(gql, rest, phil_store, queue_store, llm_client=None)
         report = await pipeline.run(OWNER, REPO, cost_cap=50.0)
         # In training mode, approved_executed should be empty
-        record("11b_no_execution_in_training", len(report.approved_executed) == 0,
-               f"approved_executed={report.approved_executed}")
+        record(
+            "11b_no_execution_in_training",
+            len(report.approved_executed) == 0,
+            f"approved_executed={report.approved_executed}",
+        )
     except Exception as e:
         record("11b_no_execution_in_training", False, str(e))
 
@@ -287,8 +303,9 @@ async def main():
         pipeline = BarkPipeline(gql, rest, phil_store, queue_store, llm_client=None)
         report = await pipeline.run(OWNER, REPO, cost_cap=50.0)
         # In active mode, the approved_executed path is enabled (may be empty if no approvals)
-        record("11c_active_mode_path_enabled", True,
-               f"active mode bark ran, approved_executed={report.approved_executed}")
+        record(
+            "11c_active_mode_path_enabled", True, f"active mode bark ran, approved_executed={report.approved_executed}"
+        )
     except Exception as e:
         record("11c_active_mode_path_enabled", False, str(e))
 
@@ -314,7 +331,7 @@ async def main():
     # ── Teardown: clean up test discussions ──
     print("🧹 Cleanup: Removing test discussions...")
     discussions = await gql.list_discussions(OWNER, REPO)
-    delete_mutation = 'mutation($id: ID!) { deleteDiscussion(input: {id: $id}) { discussion { id } } }'
+    delete_mutation = "mutation($id: ID!) { deleteDiscussion(input: {id: $id}) { discussion { id } } }"
     for d in discussions:
         title = d.get("title", "")
         if title in ("🐕 Collie Philosophy", "🐕 Collie Queue"):

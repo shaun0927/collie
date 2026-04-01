@@ -332,7 +332,7 @@ async def test_partial_execution_continues_on_failure():
     """✅ Checklist #10: When 5 out of 50 approvals fail, the remaining 45 complete successfully."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from collie.core.executor import ExecutionReport, ExecutionStatus, Executor
+    from collie.core.executor import Executor
     from collie.core.models import Recommendation, RecommendationAction
 
     # Create a mock REST client that fails on specific numbers
@@ -350,8 +350,7 @@ async def test_partial_execution_continues_on_failure():
 
     # Create 50 recommendations
     recs = [
-        Recommendation(number=i, item_type="pr", action=RecommendationAction.MERGE, reason="test")
-        for i in range(1, 51)
+        Recommendation(number=i, item_type="pr", action=RecommendationAction.MERGE, reason="test") for i in range(1, 51)
     ]
 
     report = await executor.execute_batch("test", "repo", recs)
@@ -471,7 +470,7 @@ async def test_rate_limit_halt_and_report():
     """✅ Checklist #14: Remaining execution is halted and reported when rate limit is reached."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from collie.core.executor import ExecutionStatus, Executor
+    from collie.core.executor import Executor
     from collie.core.models import Recommendation, RecommendationAction
 
     call_count = 0
@@ -488,8 +487,7 @@ async def test_rate_limit_halt_and_report():
 
     executor = Executor(mock_rest)
     recs = [
-        Recommendation(number=i, item_type="pr", action=RecommendationAction.MERGE, reason="test")
-        for i in range(1, 6)
+        Recommendation(number=i, item_type="pr", action=RecommendationAction.MERGE, reason="test") for i in range(1, 6)
     ]
 
     report = await executor.execute_batch("test", "repo", recs)

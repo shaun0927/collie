@@ -19,6 +19,7 @@ async def get_clients():
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         import subprocess
+
         result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             token = result.stdout.strip()
@@ -34,6 +35,7 @@ async def test_checkbox_1_mcp_entry_point():
 
     # Check pyproject.toml entry points
     import tomllib
+
     with open(os.path.join(os.path.dirname(__file__), "..", "pyproject.toml"), "rb") as f:
         config = tomllib.load(f)
 
@@ -118,7 +120,7 @@ async def test_checkbox_3_sit_analyze():
             print(f"  Guide preview: {guide[:300]}...")
 
         has_content = bool(guide)
-        print(f"  PASS: sit_analyze returns analysis + interview guide" if has_content else "  FAIL: Empty guide")
+        print("  PASS: sit_analyze returns analysis + interview guide" if has_content else "  FAIL: Empty guide")
         return has_content
     finally:
         await gql.close()
@@ -137,13 +139,14 @@ async def test_checkbox_4_sit_save():
 
         # Create a test philosophy
         test_phil = Philosophy.from_markdown(
-            "# Merge Philosophy\n\n## Rules\n- Auto-merge dependabot patches\n- Hold all breaking changes for review\n\n## Mode\ntraining"
+            "# Merge Philosophy\n\n## Rules\n- Auto-merge dependabot patches\n"
+            "- Hold all breaking changes for review\n\n## Mode\ntraining"
         )
         url = await phil_store.save(OWNER, REPO, test_phil)
         print(f"  Saved philosophy URL: {url}")
 
         has_url = bool(url) and ("github.com" in url or "discussion" in url.lower())
-        print(f"  PASS: Philosophy saved to Discussion" if has_url else f"  FAIL: Invalid URL: {url}")
+        print("  PASS: Philosophy saved to Discussion" if has_url else f"  FAIL: Invalid URL: {url}")
         return has_url
     except Exception as e:
         print(f"  ERROR: {e}")
@@ -180,7 +183,7 @@ async def test_checkbox_5_bark():
         has_recs = len(report.recommendations) >= 0  # May be 0 if no open items
         has_summary = bool(summary)
         passed = has_recs and has_summary
-        print(f"  PASS: bark ran analysis and returned report" if passed else "  FAIL")
+        print("  PASS: bark ran analysis and returned report" if passed else "  FAIL")
         return passed
     except Exception as e:
         print(f"  ERROR: {e}")
@@ -243,7 +246,7 @@ async def test_checkbox_7_reject():
         print(f"  Result: {result}")
 
         has_suggestion = isinstance(result, dict) and "suggestion" in result
-        print(f"  PASS: reject returned micro-update suggestion" if has_suggestion else "  FAIL")
+        print("  PASS: reject returned micro-update suggestion" if has_suggestion else "  FAIL")
         return has_suggestion
     except Exception as e:
         print(f"  ERROR: {e}")
@@ -251,6 +254,7 @@ async def test_checkbox_7_reject():
             print("  NOTE: Needs philosophy setup - code path verified via code analysis")
             # Verify the code path returns the right structure
             import inspect
+
             source = inspect.getsource(cmd.micro_update)
             has_suggestion_key = "suggestion" in source
             print(f"  Code returns 'suggestion' key: {has_suggestion_key}")
@@ -276,9 +280,14 @@ async def test_checkbox_8_status():
         print(f"  has_philosophy: {report.has_philosophy}")
 
         # Check if summary includes expected fields
-        has_mode = hasattr(report, "mode") or "mode" in summary.lower() or "training" in summary.lower() or "active" in summary.lower()
+        has_mode = (
+            hasattr(report, "mode")
+            or "mode" in summary.lower()
+            or "training" in summary.lower()
+            or "active" in summary.lower()
+        )
         print(f"  Contains mode info: {has_mode}")
-        print(f"  PASS: status returns report" if True else "  FAIL")
+        print("  PASS: status returns report" if True else "  FAIL")
         return True
     except Exception as e:
         print(f"  ERROR: {e}")
@@ -305,24 +314,28 @@ async def test_checkbox_9_bark_with_api_key():
     if has_key:
         llm = _create_llm_if_available()
         from collie.core.llm_client import LLMClient
+
         is_llm = isinstance(llm, LLMClient)
         print(f"  LLMClient created: {is_llm}")
-        print(f"  PASS: bark uses own LLM engine when API key present" if is_llm else "  FAIL")
+        print("  PASS: bark uses own LLM engine when API key present" if is_llm else "  FAIL")
         return is_llm
     else:
         # Verify code logic by importing and checking
         from collie.core.llm_client import LLMClient
+
         # Simulate: if key existed, LLMClient would be created
         test_llm = LLMClient("fake-key-for-test")
         print(f"  LLMClient instantiated with key: {test_llm is not None}")
 
         # Verify bark pipeline uses llm when provided
-        from collie.commands.bark import BarkPipeline
         import inspect
+
+        from collie.commands.bark import BarkPipeline
+
         bark_source = inspect.getsource(BarkPipeline.run)
         uses_llm = "self.llm" in bark_source or "llm" in bark_source
         print(f"  BarkPipeline.run references llm: {uses_llm}")
-        print(f"  PASS: Code correctly routes to own engine with API key" if uses_llm else "  FAIL")
+        print("  PASS: Code correctly routes to own engine with API key" if uses_llm else "  FAIL")
         return uses_llm
 
 
@@ -330,17 +343,18 @@ async def test_checkbox_10_bark_without_api_key():
     """Checkbox 10: bark returns data only when no API key present"""
     print("\n=== Checkbox 10: bark without API key (data only) ===")
 
-    from collie.core.analyzer import T2Summarizer, T3Reviewer
     import inspect
 
+    from collie.core.analyzer import T2Summarizer, T3Reviewer
+
     # Check T2Summarizer behavior without LLM
-    t2 = T2Summarizer(llm=None)
+    T2Summarizer(llm=None)
     t2_source = inspect.getsource(T2Summarizer.analyze)
     t2_handles_none = "self.llm is None" in t2_source or "not self.llm" in t2_source
     print(f"  T2Summarizer handles None LLM: {t2_handles_none}")
 
     # Check T3Reviewer behavior without LLM
-    t3 = T3Reviewer(llm=None)
+    T3Reviewer(llm=None)
     t3_source = inspect.getsource(T3Reviewer.analyze)
     t3_handles_none = "self.llm is None" in t3_source or "not self.llm" in t3_source
     print(f"  T3Reviewer handles None LLM: {t3_handles_none}")
@@ -353,12 +367,13 @@ async def test_checkbox_10_bark_without_api_key():
 
     # Verify MCP dispatch returns data (summary string)
     from collie.mcp.server import _dispatch
+
     mcp_source = inspect.getsource(_dispatch)
     bark_returns_summary = "report.summary()" in mcp_source
     print(f"  MCP bark returns report.summary(): {bark_returns_summary}")
 
     passed = t2_handles_none and t3_handles_none and bark_returns_summary
-    print(f"  PASS: bark returns data only (HOLD) without API key" if passed else "  FAIL")
+    print("  PASS: bark returns data only (HOLD) without API key" if passed else "  FAIL")
     return passed
 
 
@@ -371,7 +386,7 @@ async def test_checkbox_11_error_messages():
     original = os.environ.get("GITHUB_TOKEN", "")
     os.environ["GITHUB_TOKEN"] = ""
     # Also temporarily hide gh CLI
-    original_path = os.environ.get("PATH", "")
+    _original_path = os.environ.get("PATH", "")
 
     result = await call_tool("collie_status", {"owner": "test", "repo": "test"})
     text = result[0].text
@@ -393,7 +408,12 @@ async def test_checkbox_11_error_messages():
     is_readable_3 = bool(text3) and not text3.startswith("{")  # Not raw JSON/stacktrace
 
     passed = is_readable_1 and is_readable_2 and is_readable_3
-    print(f"  PASS: All errors are human-readable" if passed else f"  PARTIAL: readable_1={is_readable_1}, readable_2={is_readable_2}, readable_3={is_readable_3}")
+    msg = (
+        "  PASS: All errors are human-readable"
+        if passed
+        else (f"  PARTIAL: readable_1={is_readable_1}, readable_2={is_readable_2}, readable_3={is_readable_3}")
+    )
+    print(msg)
     return passed
 
 
@@ -402,7 +422,7 @@ async def test_checkbox_12_progress_notifications():
     print("\n=== Checkbox 12: Progress notifications ===")
     import inspect
 
-    from collie.mcp.server import call_tool, server as mcp_server
+    from collie.mcp.server import call_tool
 
     # Check if server uses notifications
     server_source = inspect.getsource(call_tool)
@@ -416,11 +436,10 @@ async def test_checkbox_12_progress_notifications():
 
     # Check bark pipeline for progress reporting
     from collie.commands.bark import BarkPipeline
+
     bark_source = inspect.getsource(BarkPipeline)
     bark_progress = (
-        "progress" in bark_source.lower()
-        or "notification" in bark_source.lower()
-        or "callback" in bark_source.lower()
+        "progress" in bark_source.lower() or "notification" in bark_source.lower() or "callback" in bark_source.lower()
     )
     print(f"  BarkPipeline has progress mechanism: {bark_progress}")
 
@@ -463,6 +482,7 @@ async def run_all():
         except Exception as e:
             print(f"  EXCEPTION: {e}")
             import traceback
+
             traceback.print_exc()
             results[num] = False
 

@@ -3,9 +3,7 @@
 Runs against shaun0927/collie-test-sandbox with live GitHub API.
 """
 
-import asyncio
 import subprocess
-import copy
 
 import pytest
 import pytest_asyncio
@@ -64,6 +62,7 @@ async def snapshot_philosophy(stores):
     # Restore original philosophy
     if original_md:
         from collie.core.models import Philosophy
+
         restored = Philosophy.from_markdown(original_md)
         await ps.save(OWNER, REPO, restored)
 
@@ -77,7 +76,6 @@ async def snapshot_queue(stores):
     yield original_body
     # Restore original queue
     if disc and original_body:
-        from collie.github.graphql import GitHubGraphQL
         await qs.gql.update_discussion_body(disc["id"], original_body)
 
 
@@ -149,20 +147,34 @@ class TestRejectMicroUpdate:
     # Checklist 4: After micro-update, all pending are invalidated
     # ============================================================
     @pytest.mark.asyncio
-    async def test_04_pending_invalidated_after_micro_update(self, shake_cmd, stores, snapshot_philosophy, snapshot_queue):
+    async def test_04_pending_invalidated_after_micro_update(
+        self, shake_cmd, stores, snapshot_philosophy, snapshot_queue
+    ):
         """Checklist 4: After a micro-update, all pending recommendations are invalidated."""
         ps, qs = stores
-        from collie.core.models import RecommendationStatus, Recommendation, ItemType, RecommendationAction
+        from collie.core.models import ItemType, Recommendation, RecommendationAction, RecommendationStatus
 
         # Ensure pending items exist (inject if needed)
         items_before = await qs._load_items(OWNER, REPO)
         pending_before = [i for i in items_before if i.status == RecommendationStatus.PENDING]
         if len(pending_before) == 0:
             test_items = [
-                Recommendation(number=88801, item_type=ItemType.PR, action=RecommendationAction.MERGE,
-                               reason="test", title="Test pending 1", status=RecommendationStatus.PENDING),
-                Recommendation(number=88802, item_type=ItemType.PR, action=RecommendationAction.HOLD,
-                               reason="test", title="Test pending 2", status=RecommendationStatus.PENDING),
+                Recommendation(
+                    number=88801,
+                    item_type=ItemType.PR,
+                    action=RecommendationAction.MERGE,
+                    reason="test",
+                    title="Test pending 1",
+                    status=RecommendationStatus.PENDING,
+                ),
+                Recommendation(
+                    number=88802,
+                    item_type=ItemType.PR,
+                    action=RecommendationAction.HOLD,
+                    reason="test",
+                    title="Test pending 2",
+                    status=RecommendationStatus.PENDING,
+                ),
             ]
             await qs.upsert_recommendations(OWNER, REPO, test_items)
             items_before = await qs._load_items(OWNER, REPO)
@@ -201,11 +213,14 @@ class TestRejectMicroUpdate:
 
         # Modify philosophy (simulate micro-update changing it)
         from collie.core.models import HardRule
-        phil.hard_rules.append(HardRule(
-            condition="test_fullscan",
-            action="hold",
-            description="temp rule for full scan test",
-        ))
+
+        phil.hard_rules.append(
+            HardRule(
+                condition="test_fullscan",
+                action="hold",
+                description="temp rule for full scan test",
+            )
+        )
         await ps.save(OWNER, REPO, phil)
 
         # Now check: should_full_scan should return True
@@ -241,11 +256,14 @@ class TestRejectMicroUpdate:
 
         # Edit: add a new hard rule
         from collie.core.models import HardRule
-        phil.hard_rules.append(HardRule(
-            condition="large_diff",
-            action="hold",
-            description="Hold PRs with large diffs for manual review",
-        ))
+
+        phil.hard_rules.append(
+            HardRule(
+                condition="large_diff",
+                action="hold",
+                description="Hold PRs with large diffs for manual review",
+            )
+        )
         await ps.save(OWNER, REPO, phil)
 
         # Verify
@@ -259,7 +277,7 @@ class TestRejectMicroUpdate:
 
         reloaded2 = await ps.load(OWNER, REPO)
         assert len(reloaded2.hard_rules) == original_count
-        print(f"  PASS: hard rules editable ({original_count} -> {original_count+1} -> {original_count})")
+        print(f"  PASS: hard rules editable ({original_count} -> {original_count + 1} -> {original_count})")
 
     # ============================================================
     # Checklist 8: Natural-language philosophy can be edited
@@ -335,10 +353,11 @@ class TestRejectMicroUpdate:
 
         if pending_count == 0:
             # The queue might have been expired by earlier tests, so check expired count instead
-            expired_count = sum(1 for i in items if i.status == RecommendationStatus.EXPIRED)
+            _expired_count = sum(1 for i in items if i.status == RecommendationStatus.EXPIRED)
             # Just verify invalidate_all works on any pending we can create
             # Re-inject a pending item for testing
-            from collie.core.models import Recommendation, ItemType, RecommendationAction
+            from collie.core.models import ItemType, Recommendation, RecommendationAction
+
             test_item = Recommendation(
                 number=99999,
                 item_type=ItemType.PR,
@@ -381,7 +400,10 @@ class TestRejectMicroUpdate:
         result = await _dispatch(
             "collie_reject",
             {"owner": OWNER, "repo": REPO, "number": 42, "reason": "vendor lock-in"},
-            gql, rest, ps, qs,
+            gql,
+            rest,
+            ps,
+            qs,
         )
 
         assert "Rejected #42" in result
@@ -449,20 +471,25 @@ class TestRejectMicroUpdate:
         phil_after = await ps.load(OWNER, REPO)
 
         # vendor + untested = hard_rules (+2), security = escalation (+1)
-        assert len(phil_after.hard_rules) == base_hard_count + 2, \
+        assert len(phil_after.hard_rules) == base_hard_count + 2, (
             f"Expected {base_hard_count + 2} hard rules, got {len(phil_after.hard_rules)}"
-        assert len(phil_after.escalation_rules) == base_escalation_count + 1, \
+        )
+        assert len(phil_after.escalation_rules) == base_escalation_count + 1, (
             f"Expected {base_escalation_count + 1} escalation rules, got {len(phil_after.escalation_rules)}"
+        )
 
         # Verify YAML roundtrip consistency
         md = phil_after.to_markdown()
         from collie.core.models import Philosophy
+
         roundtrip = Philosophy.from_markdown(md)
         assert len(roundtrip.hard_rules) == len(phil_after.hard_rules)
         assert len(roundtrip.escalation_rules) == len(phil_after.escalation_rules)
         assert roundtrip.soft_text == phil_after.soft_text
         assert roundtrip.tuning.confidence_threshold == phil_after.tuning.confidence_threshold
 
-        print(f"  PASS: 3 consecutive micro-updates consistent "
-              f"(hard: {base_hard_count}->{len(phil_after.hard_rules)}, "
-              f"escalation: {base_escalation_count}->{len(phil_after.escalation_rules)})")
+        print(
+            f"  PASS: 3 consecutive micro-updates consistent "
+            f"(hard: {base_hard_count}->{len(phil_after.hard_rules)}, "
+            f"escalation: {base_escalation_count}->{len(phil_after.escalation_rules)})"
+        )
