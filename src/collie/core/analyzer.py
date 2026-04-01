@@ -92,7 +92,9 @@ class T1Scanner:
         """Extract CI status from PR data."""
         commits = item.get("commits", {}).get("nodes", [])
         if commits:
-            rollup = commits[0].get("commit", {}).get("statusCheckRollup", {})
+            rollup = commits[0].get("commit", {}).get("statusCheckRollup")
+            if rollup is None:
+                return "UNKNOWN"
             return rollup.get("state", "UNKNOWN")
         return "UNKNOWN"
 
@@ -187,7 +189,9 @@ class T2Summarizer:
     def _get_ci_state(self, item: dict) -> str:
         commits = item.get("commits", {}).get("nodes", [])
         if commits:
-            rollup = commits[0].get("commit", {}).get("statusCheckRollup", {})
+            rollup = commits[0].get("commit", {}).get("statusCheckRollup")
+            if rollup is None:
+                return "UNKNOWN"
             return rollup.get("state", "UNKNOWN")
         return "UNKNOWN"
 

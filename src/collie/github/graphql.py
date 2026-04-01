@@ -98,7 +98,7 @@ class GitHubGraphQL:
     def __init__(self, token: str):
         self.token = token
         self.client = httpx.AsyncClient(
-            base_url="https://api.github.com/graphql",
+            base_url="https://api.github.com",
             headers={"Authorization": f"bearer {token}", "Content-Type": "application/json"},
             timeout=30.0,
         )
@@ -106,7 +106,7 @@ class GitHubGraphQL:
 
     async def _execute(self, query: str, variables: dict) -> dict:
         """Execute a GraphQL query and return the data, tracking rate limits."""
-        response = await self.client.post("", json={"query": query, "variables": variables})
+        response = await self.client.post("/graphql", json={"query": query, "variables": variables})
         response.raise_for_status()
 
         # Track rate limit from headers
@@ -207,6 +207,52 @@ class GitHubGraphQL:
         """Update a discussion body via GraphQL mutation."""
         data = await self._execute(UPDATE_DISCUSSION_MUTATION, {"discussionId": discussion_id, "body": body})
         return data["updateDiscussion"]["discussion"]
+
+    # Aliases used by stores
+    async def list_discussions(self, owner: str, repo: str, category: str = "") -> list[dict]:
+        """List discussions, optionally filtered by category name."""
+        query = """
+        query($owner: String!, $repo: String!, $after: String) {
+          repository(owner: $owner, name: $repo) {
+            discussions(first: 50, after: $after) {
+              pageInfo { hasNextPage endCursor }
+              nodes { id title body category { name } url }
+            }
+          }
+        }
+        """
+        results = []
+        after = None
+        while True:
+            data = await self._execute(query, {"owner": owner, "repo": repo, "after": after})
+            nodes = data["repository"]["discussions"]["nodes"]
+            for node in nodes:
+                if not category or node.get("category", {}).get("name") == category:
+                    results.append(node)
+            page_info = data["repository"]["discussions"]["pageInfo"]
+            if not page_info["hasNextPage"]:
+                break
+            after = page_info["endCursor"]
+        return results
+
+    async def list_discussion_categories(self, owner: str, repo: str) -> list[dict]:
+        """Alias for get_discussion_categories."""
+        return await self.get_discussion_categories(owner, repo)
+
+    async def update_discussion_body(self, discussion_id: str, body: str) -> str:
+        """Update discussion body. Returns URL."""
+        result = await self.update_discussion(discussion_id, body)
+        return result.get("url", "")
+
+    async def get_repository_id(self, owner: str, repo: str) -> str:
+        """Get the node ID of a repository (needed for mutations)."""
+        query = """
+        query($owner: String!, $repo: String!) {
+          repository(owner: $owner, name: $repo) { id }
+        }
+        """
+        data = await self._execute(query, {"owner": owner, "repo": repo})
+        return data["repository"]["id"]
 
     async def close(self):
         await self.client.aclose()

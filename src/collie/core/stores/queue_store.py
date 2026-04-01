@@ -38,7 +38,7 @@ class QueueStore:
             category_id = await self._ensure_category(owner, repo)
             repo_id = await self.gql.get_repository_id(owner, repo)
             new_discussion = await self.gql.create_discussion(
-                repo_id=repo_id,
+                repository_id=repo_id,
                 category_id=category_id,
                 title=self.DISCUSSION_TITLE,
                 body=body,
@@ -165,7 +165,7 @@ class QueueStore:
 
     async def _find_discussion(self, owner: str, repo: str) -> dict | None:
         """Find the queue discussion for the given repo."""
-        discussions = await self.gql.list_discussions(owner, repo, category=self.CATEGORY_NAME)
+        discussions = await self.gql.list_discussions(owner, repo)
         for d in discussions:
             if d.get("title") == self.DISCUSSION_TITLE:
                 return d
@@ -187,13 +187,20 @@ class QueueStore:
             await self.gql.update_discussion_body(discussion["id"], body)
 
     async def _ensure_category(self, owner: str, repo: str) -> str:
-        """Return category ID, creating it if it doesn't exist."""
+        """Return category ID. Falls back to 'General' if 'Collie' doesn't exist."""
         categories = await self.gql.list_discussion_categories(owner, repo)
         for cat in categories:
             if cat.get("name") == self.CATEGORY_NAME:
                 return cat["id"]
-        category = await self.rest.create_discussion_category(owner, repo, self.CATEGORY_NAME)
-        return category["id"]
+        for cat in categories:
+            if cat.get("name") == "General":
+                return cat["id"]
+        if categories:
+            return categories[0]["id"]
+        raise ValueError(
+            f"No discussion categories found for {owner}/{repo}. "
+            "Enable Discussions in repository settings."
+        )
 
 
 def _item_label(item: Recommendation) -> str:

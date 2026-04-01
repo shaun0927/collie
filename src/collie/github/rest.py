@@ -143,6 +143,9 @@ class GitHubREST:
                 return None
             raise
         data = response.json()
+        if isinstance(data, list):
+            # Directory listing — return comma-separated filenames
+            return ", ".join(item.get("name", "") for item in data)
         if data.get("encoding") == "base64":
             return base64.b64decode(data["content"]).decode("utf-8")
         return data.get("content")
