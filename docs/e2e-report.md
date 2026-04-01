@@ -2,89 +2,119 @@
 
 **Date:** 2026-04-01
 **Test repo:** shaun0927/fastapi (fork of tiangolo/fastapi)
-**Data source:** tiangolo/fastapi (154 PRs, 22 issues)
+**Data source:** tiangolo/fastapi (154 PRs, 22 issues = 176 items)
 
-## Test Results
+## Test Results Summary
 
-### Scenario A: sit -> bark Pipeline
-
-| Step | Result | Details |
+| Test | Result | Details |
 |------|--------|---------|
-| RepoAnalyzer | PASS | Detected CONTRIBUTING.md, CI workflows |
-| Philosophy save | PASS | Created Discussion in "General" category |
-| Philosophy load | PASS | Roundtrip: 2 hard rules, mode=training |
-| bark T1 scan | PASS | 154 PRs analyzed in <5s |
+| RepoAnalyzer (sit) | **PASS** | Detected CONTRIBUTING.md, CI workflows |
+| Philosophy save/load | **PASS** | Discussion roundtrip, 2 hard rules |
+| GraphQL bulk fetch | **PASS** | 176 items in ~2s with pagination |
+| T1 Scanner (154 PRs) | **PASS** | 3 merge, 33 close, 118 hold |
+| T2 Summarizer (Codex OAuth) | **PASS** | Dependabot major bump → hold |
+| Issue Analyzer (Codex OAuth) | **PASS** | 3 issues classified correctly |
+| bark full pipeline | **PASS** | 176 items → 165 pending recommendations |
+| Discussion Queue creation | **PASS** | [shaun0927/fastapi#2](https://github.com/shaun0927/fastapi/discussions/2) |
+| Codex OAuth auto-detect | **PASS** | No API key → CodexLLMClient |
 
-### T1 Analysis Results (154 PRs)
+## Detailed Results
 
-| Action | Count | % |
-|--------|-------|---|
-| Merge | 3 | 2% |
-| Close (CI failed) | 33 | 21% |
-| Hold (needs T2) | 118 | 77% |
+### Scenario A: sit → bark Pipeline
 
-### Merge Recommendation Verification
+| Step | Result | Time |
+|------|--------|------|
+| RepoAnalyzer | PASS | ~3s |
+| Philosophy save | PASS | ~1s |
+| Philosophy load | PASS | ~1s |
+| bark T1 scan (176 items) | PASS | <1s |
+| Queue Discussion create | PASS | ~1s |
+| **Total pipeline** | **PASS** | **~6s** |
 
-T1 merge recommendations (3 PRs) — docs-only PRs with CI pass + reviews.
-These are conservative recommendations consistent with the "zero false merge" policy.
+### T1 Analysis Results (154 PRs + 22 Issues)
 
-**Sampling verdict:** 3/3 merge recommendations appear reasonable (docs-only changes).
+| Action | Count | % | Notes |
+|--------|-------|---|-------|
+| Merge | 3 | 2% | Docs-only PRs with CI pass + reviews |
+| Close | 33 | 19% | CI failed → hard rule rejection |
+| Hold | 140 | 79% | Needs T2/T3 analysis |
+| **Total** | **176** | **100%** | |
 
-### Bugs Found & Fixed
+### T2 Analysis (Codex OAuth)
 
-| Bug | Location | Fix |
-|-----|----------|-----|
-| `get_repo_content` fails on directories | `rest.py:146` | Handle list response for directory listings |
-| GraphQL URL trailing slash | `graphql.py:101` | Changed base_url to `api.github.com`, post to `/graphql` |
-| `statusCheckRollup` null | `analyzer.py:95,190` | Add None check before `.get()` |
-| `list_discussions` missing | `graphql.py` | Added method with pagination |
-| `get_repository_id` missing | `graphql.py` | Added query method |
-| Method name mismatches | `graphql.py` | Added aliases: `list_discussion_categories`, `update_discussion_body` |
-| `create_discussion` kwarg mismatch | `philosophy_store.py:30` | `repo_id=` -> `repository_id=` |
-| Category creation not supported by API | `philosophy_store.py:85` | Fallback to "General" category |
-| `_find_discussion` category filter too strict | `philosophy_store.py:79` | Search all categories by title |
+- **PR #15267** (Dependabot: fastmcp 2.14.5 → 3.2.0)
+  - Result: **hold** — "crosses a major version boundary, backward-compatibility risk"
+  - Verdict: **Correct** — philosophy's backward compat preference reflected
 
-**Total bugs found:** 9
-**All fixed and tests passing:** 182/182
+### Issue Analysis (Codex OAuth)
+
+- **Issue #13056** → label (BUG, HIGH confidence)
+- **Issue #10180** → label (BUG, MEDIUM confidence)
+- **Issue #13399** → label (BUG, MEDIUM confidence)
+- Verdict: **All correct** — properly classified bug reports
+
+### Discussion Queue
+
+- Created at: https://github.com/shaun0927/fastapi/discussions/2
+- Format: Living Document with checkboxes
+- 165 pending items with `- [ ]` checkboxes
+- Mode: training (execution blocked)
+
+## LLM Backend Verification
+
+| Backend | Status | Notes |
+|---------|--------|-------|
+| Anthropic API (ANTHROPIC_API_KEY) | Supported | Direct API calls |
+| Codex OAuth (codex CLI) | **Verified** | T2 + Issue analysis working |
+| No LLM | **Verified** | T1-only mode, $0 cost |
+| Auto-detect | **Verified** | Correctly falls back to Codex |
+
+## Bugs Found & Fixed (Total: 9)
+
+| # | Bug | Location | Fix |
+|---|-----|----------|-----|
+| 1 | `get_repo_content` fails on directories | `rest.py:146` | Handle list response |
+| 2 | GraphQL URL trailing slash | `graphql.py:101` | Fix base_url + endpoint |
+| 3 | `statusCheckRollup` null | `analyzer.py:95,190` | Add None check |
+| 4 | `list_discussions` missing | `graphql.py` | Added method |
+| 5 | `get_repository_id` missing | `graphql.py` | Added method |
+| 6 | Method name aliases missing | `graphql.py` | Added aliases |
+| 7 | `create_discussion` kwarg mismatch | `philosophy_store.py` | `repo_id` → `repository_id` |
+| 8 | Category creation not supported | `philosophy_store.py` | Fallback to "General" |
+| 9 | `_find_discussion` filter too strict | `philosophy_store.py` | Search all categories |
 
 ## Performance
 
 | Metric | Value |
 |--------|-------|
-| RepoAnalyzer | ~3s |
-| GraphQL fetch (154 PRs + 22 issues) | ~2s |
-| T1 scan (154 PRs) | <0.1s |
-| Philosophy save/load roundtrip | ~1s |
-| LLM cost (T1 only) | $0.00 |
+| GraphQL fetch (176 items) | ~2s |
+| T1 scan (176 items) | <0.1s |
+| T2 analysis (1 PR via Codex) | ~15s |
+| Issue analysis (1 issue via Codex) | ~20s |
+| Philosophy save/load | ~1s each |
+| Queue Discussion create | ~1s |
+| LLM cost (T1 only, 176 items) | **$0.00** |
 
-## Infrastructure Verified
+## Not Yet Tested
 
-- [x] GitHub PAT authentication (via env)
-- [x] GraphQL pagination (100 items per page)
-- [x] REST API write operations (Discussion create)
-- [x] Discussion as storage backend
-- [x] Philosophy markdown serialization roundtrip
-- [x] T1 rule engine (CI failed -> reject, docs-only -> merge)
-
-## Not Yet Tested (Requires LLM API key)
-
-- [ ] T2 Summarizer (LLM-based)
-- [ ] T3 Deep Reviewer (LLM-based)
-- [ ] Issue Analyzer (LLM-based)
-- [ ] Queue Living Document update
-- [ ] Approve + Execute pipeline
+- [ ] T3 Deep Reviewer (full diff analysis)
+- [ ] approve + execute (merge/close on fork)
 - [ ] Micro-update on rejection
-- [ ] Unleash mode transition
+- [ ] Unleash mode transition + execution
 - [ ] Incremental (delta) processing
 - [ ] GitHub Action cron mode
+- [ ] Checkbox approval detection
 
 ## Conclusion
 
-Collie v0.1.0 E2E testing on real fastapi data (154 PRs) confirms:
-1. **Pipeline works end-to-end**: sit -> bark -> analysis produces reasonable results
-2. **Conservative merge policy enforced**: Only 3 merge recommendations (all docs-only)
-3. **9 integration bugs found and fixed** — all in API layer/store layer mismatches
-4. **182 unit tests remain green** after all fixes
-5. **T1 analysis is fast and free** — 154 PRs in <5s, $0 cost
+Collie v0.1.0 E2E testing on tiangolo/fastapi (176 items) confirms:
 
-Next steps: Test with `ANTHROPIC_API_KEY` for T2/T3 analysis, and test approve/execute on fork.
+1. **Full pipeline works**: sit → bark → Discussion Queue creation
+2. **Conservative merge enforced**: Only 3 merge recommendations (all docs-only)
+3. **Codex OAuth works**: T2/Issue analysis without API key
+4. **Discussion storage works**: Philosophy + Queue as living documents
+5. **9 integration bugs found and fixed**
+6. **182 unit tests remain green**
+7. **T1 is fast and free**: 176 items in <1s, $0
+
+### Verdict: **v0.1.0 is functional for core workflow (sit → bark → queue)**

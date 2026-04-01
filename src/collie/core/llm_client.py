@@ -49,14 +49,17 @@ class CodexLLMClient:
 
     async def chat(self, system: str, user: str, max_tokens: int = 2000) -> str:
         """Send a prompt via codex exec and return the response."""
-        prompt = f"{system}\n\n---\n\n{user}"
+        # Truncate to avoid oversized prompts
+        system_short = system[:1000] if len(system) > 1000 else system
+        user_short = user[:2000] if len(user) > 2000 else user
+        prompt = f"{system_short}\n\n---\n\n{user_short}"
 
         result = await asyncio.to_thread(
             subprocess.run,
             ["codex", "exec", "--full-auto", prompt],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=180,
         )
 
         if result.returncode != 0:
