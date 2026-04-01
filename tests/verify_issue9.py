@@ -4,12 +4,28 @@ Real verification against fork repo shaun0927/collie.
 """
 
 import asyncio
+import os
 import subprocess
 import sys
 
-# Get GitHub token
-token = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True).stdout.strip()
-if not token:
+import pytest
+
+
+def _get_token():
+    if os.environ.get("GITHUB_TOKEN"):
+        return os.environ["GITHUB_TOKEN"]
+    try:
+        r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+        return r.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ""
+
+
+token = _get_token()
+
+pytestmark = pytest.mark.skipif(not token, reason="No GitHub token — integration test")
+
+if not token and __name__ == "__main__":
     print("FAIL: No GitHub token found")
     sys.exit(1)
 

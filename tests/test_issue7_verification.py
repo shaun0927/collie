@@ -6,12 +6,28 @@ Test fixtures: Issues #3,#4,#5; PRs #6,#7,#8 (PR #8 body: "Fixes #5").
 
 from __future__ import annotations
 
+import os
+import subprocess
+
 import pytest
 
 # ── Shared fixtures ──────────────────────────────────────────────────────────
 
 OWNER = "shaun0927"
 REPO = "collie-test-sandbox"
+
+
+def _has_token():
+    if os.environ.get("GITHUB_TOKEN"):
+        return True
+    try:
+        r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+        return bool(r.stdout.strip())
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+pytestmark = pytest.mark.skipif(not _has_token(), reason="No GitHub token — integration test")
 
 
 async def _make_clients():

@@ -5,9 +5,25 @@ Run: python tests/test_e2e_issue14.py
 """
 
 import asyncio
+import os
 import subprocess
 import time
 import traceback
+
+import pytest
+
+
+def _has_token():
+    if os.environ.get("GITHUB_TOKEN"):
+        return True
+    try:
+        r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+        return bool(r.stdout.strip())
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+pytestmark = pytest.mark.skipif(not _has_token(), reason="No GitHub token — integration test")
 
 # ── Globals ──────────────────────────────────────────────────────────
 OWNER = "shaun0927"

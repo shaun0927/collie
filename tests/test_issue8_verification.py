@@ -13,8 +13,14 @@ REPO = "collie-test-sandbox"
 
 
 def _get_token():
-    result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True)
-    return result.stdout.strip()
+    try:
+        result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+        return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ""
+
+
+pytestmark = pytest.mark.skipif(not _get_token(), reason="No GitHub token — integration test")
 
 
 @pytest_asyncio.fixture

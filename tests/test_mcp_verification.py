@@ -3,9 +3,25 @@
 import asyncio
 import json
 import os
+import subprocess
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+
+def _has_token():
+    if os.environ.get("GITHUB_TOKEN"):
+        return True
+    try:
+        r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+        return bool(r.stdout.strip())
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+pytestmark = pytest.mark.skipif(not _has_token(), reason="No GitHub token — integration test")
 
 
 OWNER = "shaun0927"
