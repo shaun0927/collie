@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,6 +26,15 @@ def load_config(path: Path | None = None) -> CollieConfig:
     config_path = path or CONFIG_PATH
     if not config_path.exists():
         return CollieConfig()
+
+    mode = config_path.stat().st_mode
+    if mode & 0o077:
+        warnings.warn(
+            f"{config_path} is world- or group-readable (mode {oct(mode & 0o777)}). "
+            "Consider running: chmod 600 ~/.collie/config.yaml",
+            UserWarning,
+            stacklevel=2,
+        )
 
     try:
         data = yaml.safe_load(config_path.read_text()) or {}
