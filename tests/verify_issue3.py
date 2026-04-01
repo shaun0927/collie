@@ -13,11 +13,11 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from collie.auth.providers import AuthError, GitHubAuth, LLMAuth
-from collie.github.graphql import GitHubGraphQL, GitHubGraphQLError
-from collie.github.rest import GitHubREST, _request_with_retry, _RETRY_STATUSES, _MAX_RETRIES, _BASE_BACKOFF
-
 import httpx
+
+from collie.auth.providers import AuthError, GitHubAuth, LLMAuth
+from collie.github.graphql import GitHubGraphQL
+from collie.github.rest import _RETRY_STATUSES, GitHubREST, _request_with_retry
 
 OWNER = "shaun0927"
 REPO = "collie"
@@ -74,10 +74,12 @@ async def test_03_04():
         n_prs = len(data["pull_requests"])
         total = n_issues + n_prs
         paginated = n_issues > 100 or n_prs > 100
-        report("03_bulk_fetch_500", total >= 500,
-               f"{n_issues} issues + {n_prs} PRs = {total} from {LARGE_OWNER}/{LARGE_REPO}")
-        report("04_graphql_pagination", paginated,
-               f"Issues: {n_issues}, PRs: {n_prs} — multi-page: {paginated}")
+        report(
+            "03_bulk_fetch_500",
+            total >= 500,
+            f"{n_issues} issues + {n_prs} PRs = {total} from {LARGE_OWNER}/{LARGE_REPO}",
+        )
+        report("04_graphql_pagination", paginated, f"Issues: {n_issues}, PRs: {n_prs} — multi-page: {paginated}")
     except Exception as e:
         report("03_bulk_fetch_500", False, str(e))
         report("04_graphql_pagination", False, str(e))
@@ -95,8 +97,11 @@ async def test_05():
         # Use a known merged PR from cli/cli (larger)
         files_large = await gql.fetch_pr_files("cli", "cli", 13048)
         both_ok = len(files_small) > 0 and len(files_large) > 0
-        report("05_pr_diff_fetch", both_ok,
-               f"Small ({OWNER}/{REPO}#22): {len(files_small)} files, Large (cli/cli#13048): {len(files_large)} files")
+        report(
+            "05_pr_diff_fetch",
+            both_ok,
+            f"Small ({OWNER}/{REPO}#22): {len(files_small)} files, Large (cli/cli#13048): {len(files_large)} files",
+        )
     except Exception as e:
         report("05_pr_diff_fetch", False, str(e))
     finally:
@@ -121,11 +126,16 @@ async def test_06():
         updated = await gql.update_discussion(created["id"], "Updated body.")
         update_ok = updated.get("body") == "Updated body."
         # Cleanup: delete via gh CLI
-        subprocess.run(["gh", "api", "--method", "DELETE",
-                        f"/repos/{OWNER}/{REPO}/discussions/{created['number']}"],
-                       capture_output=True, timeout=10)
-        report("06_discussion_crud", read_ok and update_ok,
-               f"#{created['number']}: Read={'OK' if read_ok else 'FAIL'}, Update={'OK' if update_ok else 'FAIL'}")
+        subprocess.run(
+            ["gh", "api", "--method", "DELETE", f"/repos/{OWNER}/{REPO}/discussions/{created['number']}"],
+            capture_output=True,
+            timeout=10,
+        )
+        report(
+            "06_discussion_crud",
+            read_ok and update_ok,
+            f"#{created['number']}: Read={'OK' if read_ok else 'FAIL'}, Update={'OK' if update_ok else 'FAIL'}",
+        )
     except Exception as e:
         report("06_discussion_crud", False, str(e))
     finally:
@@ -151,8 +161,7 @@ async def test_08():
     rest = GitHubREST(auth.token)
     try:
         result = await rest.enable_discussions("torvalds", "linux")
-        report("08_discussions_no_admin", result is False,
-               f"torvalds/linux returned {result} (expected False)")
+        report("08_discussions_no_admin", result is False, f"torvalds/linux returned {result} (expected False)")
     except Exception as e:
         report("08_discussions_no_admin", False, str(e))
     finally:
@@ -169,14 +178,16 @@ async def test_09():
         sha = resp.json()["object"]["sha"]
         ts = int(time.time())
         branch = f"test-merge-{ts}"
-        await rest.client.post(f"/repos/{OWNER}/{REPO}/git/refs",
-                               json={"ref": f"refs/heads/{branch}", "sha": sha})
+        await rest.client.post(f"/repos/{OWNER}/{REPO}/git/refs", json={"ref": f"refs/heads/{branch}", "sha": sha})
         content = base64.b64encode(f"# merge test {ts}\n".encode()).decode()
-        await rest.client.put(f"/repos/{OWNER}/{REPO}/contents/_test_merge_{ts}.md",
-                              json={"message": "test: merge verify", "content": content, "branch": branch})
-        resp = await rest.client.post(f"/repos/{OWNER}/{REPO}/pulls",
-                                      json={"title": f"[Test] Merge verify {ts}",
-                                            "body": "Auto cleanup.", "head": branch, "base": "main"})
+        await rest.client.put(
+            f"/repos/{OWNER}/{REPO}/contents/_test_merge_{ts}.md",
+            json={"message": "test: merge verify", "content": content, "branch": branch},
+        )
+        resp = await rest.client.post(
+            f"/repos/{OWNER}/{REPO}/pulls",
+            json={"title": f"[Test] Merge verify {ts}", "body": "Auto cleanup.", "head": branch, "base": "main"},
+        )
         resp.raise_for_status()
         pr_num = resp.json()["number"]
         merge = await rest.merge_pr(OWNER, REPO, pr_num, method="squash")
@@ -187,8 +198,11 @@ async def test_09():
         resp2 = await rest.client.get(f"/repos/{OWNER}/{REPO}/contents/_test_merge_{ts}.md")
         if resp2.status_code == 200:
             file_sha = resp2.json()["sha"]
-            await rest.client.request("DELETE", f"/repos/{OWNER}/{REPO}/contents/_test_merge_{ts}.md",
-                                      json={"message": "cleanup: remove test file", "sha": file_sha})
+            await rest.client.request(
+                "DELETE",
+                f"/repos/{OWNER}/{REPO}/contents/_test_merge_{ts}.md",
+                json={"message": "cleanup: remove test file", "sha": file_sha},
+            )
         report("09_pr_merge", merged, f"PR #{pr_num} merged: {merged}")
     except Exception as e:
         report("09_pr_merge", False, str(e))
@@ -201,17 +215,20 @@ async def test_10():
     auth = GitHubAuth.from_env()
     rest = GitHubREST(auth.token)
     try:
-        resp = await rest.client.post(f"/repos/{OWNER}/{REPO}/issues",
-                                      json={"title": "[Test] close+comment verify",
-                                            "body": "Auto cleanup."})
+        resp = await rest.client.post(
+            f"/repos/{OWNER}/{REPO}/issues", json={"title": "[Test] close+comment verify", "body": "Auto cleanup."}
+        )
         resp.raise_for_status()
         num = resp.json()["number"]
         comment = await rest.add_comment(OWNER, REPO, num, "Verification comment.")
         comment_ok = "id" in comment
         closed = await rest.close_issue(OWNER, REPO, num)
         close_ok = closed.get("state") == "closed"
-        report("10_issue_close_comment", comment_ok and close_ok,
-               f"#{num}: comment={'OK' if comment_ok else 'FAIL'}, close={'OK' if close_ok else 'FAIL'}")
+        report(
+            "10_issue_close_comment",
+            comment_ok and close_ok,
+            f"#{num}: comment={'OK' if comment_ok else 'FAIL'}, close={'OK' if close_ok else 'FAIL'}",
+        )
     except Exception as e:
         report("10_issue_close_comment", False, str(e))
     finally:
@@ -223,17 +240,19 @@ async def test_11():
     auth = GitHubAuth.from_env()
     rest = GitHubREST(auth.token)
     try:
-        resp = await rest.client.post(f"/repos/{OWNER}/{REPO}/issues",
-                                      json={"title": "[Test] label verify", "body": "Auto cleanup."})
+        resp = await rest.client.post(
+            f"/repos/{OWNER}/{REPO}/issues", json={"title": "[Test] label verify", "body": "Auto cleanup."}
+        )
         resp.raise_for_status()
         num = resp.json()["number"]
         try:
-            await rest.client.post(f"/repos/{OWNER}/{REPO}/labels",
-                                   json={"name": "verification-test", "color": "0e8a16"})
+            await rest.client.post(
+                f"/repos/{OWNER}/{REPO}/labels", json={"name": "verification-test", "color": "0e8a16"}
+            )
         except Exception:
             pass
         result = await rest.add_labels(OWNER, REPO, num, ["verification-test"])
-        labels = [l["name"] for l in result] if isinstance(result, list) else []
+        labels = [lb["name"] for lb in result] if isinstance(result, list) else []
         ok = "verification-test" in labels
         await rest.close_issue(OWNER, REPO, num)
         report("11_label_addition", ok, f"#{num}: labels={labels}")
@@ -259,8 +278,11 @@ async def test_12():
     try:
         resp = await _request_with_retry(client, "GET", "https://api.github.com/test")
         retried = call_count == 3 and resp.status_code == 200
-        report("12_retry_on_429", has_429 and retried,
-               f"429 in statuses: {has_429}, attempts: {call_count}, final status: {resp.status_code}")
+        report(
+            "12_retry_on_429",
+            has_429 and retried,
+            f"429 in statuses: {has_429}, attempts: {call_count}, final status: {resp.status_code}",
+        )
     except Exception as e:
         report("12_retry_on_429", False, str(e))
     finally:
@@ -275,8 +297,7 @@ async def test_13():
         before = gql.rate_limit_remaining
         await gql._execute("query { viewer { login } }", {})
         after = gql.rate_limit_remaining
-        report("13_rate_limit_logging", before is None and after is not None,
-               f"Before: {before}, After: {after}")
+        report("13_rate_limit_logging", before is None and after is not None, f"Before: {before}, After: {after}")
     except Exception as e:
         report("13_rate_limit_logging", False, str(e))
     finally:
@@ -288,8 +309,11 @@ async def test_14():
     real_key = os.environ.get("ANTHROPIC_API_KEY")
     if real_key:
         auth = LLMAuth.from_env()
-        report("14_anthropic_api_key", auth.api_key == real_key and auth.provider == "anthropic",
-               f"Provider: {auth.provider}, key: {auth.api_key[:12]}...")
+        report(
+            "14_anthropic_api_key",
+            auth.api_key == real_key and auth.provider == "anthropic",
+            f"Provider: {auth.provider}, key: {auth.api_key[:12]}...",
+        )
     else:
         # Key not in this shell — verify the code path with a test value
         test_key = "sk-ant-test-verification-key-12345"
@@ -297,8 +321,11 @@ async def test_14():
         try:
             auth = LLMAuth.from_env()
             ok = auth.api_key == test_key and auth.provider == "anthropic"
-            report("14_anthropic_api_key", ok,
-                   f"Code path verified with test key: provider={auth.provider}, key_match={ok}")
+            report(
+                "14_anthropic_api_key",
+                ok,
+                f"Code path verified with test key: provider={auth.provider}, key_match={ok}",
+            )
         finally:
             del os.environ["ANTHROPIC_API_KEY"]
 
@@ -341,8 +368,9 @@ async def test_16():
 async def test_17():
     """Network error produces clean exception, not raw traceback."""
     gql = GitHubGraphQL("fake")
-    gql.client = httpx.AsyncClient(base_url="https://localhost:1",
-                                   headers={"Authorization": "bearer fake"}, timeout=2.0)
+    gql.client = httpx.AsyncClient(
+        base_url="https://localhost:1", headers={"Authorization": "bearer fake"}, timeout=2.0
+    )
     try:
         await gql._execute("query { viewer { login } }", {})
         report("17_network_error", False, "No error raised")

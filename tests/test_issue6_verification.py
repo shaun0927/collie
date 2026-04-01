@@ -6,24 +6,32 @@ Run: pytest tests/test_issue6_verification.py -v
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
-from datetime import datetime, timezone
 
-from collie.core.analyzer import T1Scanner, T2Summarizer, T3Reviewer, IssueAnalyzer, Tier
-from collie.core.models import (
-    HardRule, EscalationRule, Philosophy, TuningParams, Mode,
-    ItemType, Recommendation, RecommendationAction, RecommendationStatus,
-)
+from collie.commands.bark import BarkPipeline
+from collie.core.analyzer import IssueAnalyzer, T1Scanner, T2Summarizer, T3Reviewer, Tier
 from collie.core.cost_tracker import CostTracker
-from collie.core.incremental import IncrementalManager
 from collie.core.dependency_resolver import DependencyResolver
-from collie.core.executor import Executor, ExecutionStatus
+from collie.core.executor import ExecutionStatus, Executor
+from collie.core.incremental import IncrementalManager
+from collie.core.models import (
+    EscalationRule,
+    HardRule,
+    ItemType,
+    Mode,
+    Philosophy,
+    Recommendation,
+    RecommendationAction,
+    RecommendationStatus,
+    TuningParams,
+)
+from collie.core.prompts import ISSUE_ANALYZE_PROMPT, T2_SUMMARIZE_PROMPT
 from collie.core.stores.queue_store import QueueStore
-from collie.core.prompts import T2_SUMMARIZE_PROMPT, T3_DEEP_REVIEW_PROMPT, ISSUE_ANALYZE_PROMPT
-from collie.commands.bark import BarkPipeline, BarkReport
-
 
 # ═══════════════════════ Helpers ═══════════════════════════════════════
+
 
 class MockLLM:
     def __init__(self, response: str):
@@ -92,11 +100,22 @@ class MockQueueStore:
         self.invalidated = True
 
 
-def make_pr(number=1, title="Feature X", body="Adds feature X.", additions=50, deletions=10,
-            changed_files=5, ci_state="SUCCESS", reviews=None):
+def make_pr(
+    number=1,
+    title="Feature X",
+    body="Adds feature X.",
+    additions=50,
+    deletions=10,
+    changed_files=5,
+    ci_state="SUCCESS",
+    reviews=None,
+):
     return {
-        "number": number, "title": title, "body": body,
-        "additions": additions, "deletions": deletions,
+        "number": number,
+        "title": title,
+        "body": body,
+        "additions": additions,
+        "deletions": deletions,
         "changedFiles": changed_files,
         "author": {"login": "contributor"},
         "labels": {"nodes": []},
@@ -105,14 +124,22 @@ def make_pr(number=1, title="Feature X", body="Adds feature X.", additions=50, d
     }
 
 
-def make_issue(number=10, title="Bug report", body="Steps to reproduce...",
-               updated_at="2025-01-01T00:00:00Z", comments_count=3, labels=None):
+def make_issue(
+    number=10,
+    title="Bug report",
+    body="Steps to reproduce...",
+    updated_at="2025-01-01T00:00:00Z",
+    comments_count=3,
+    labels=None,
+):
     return {
-        "number": number, "title": title, "body": body,
+        "number": number,
+        "title": title,
+        "body": body,
         "createdAt": "2024-01-01T00:00:00Z",
         "updatedAt": updated_at,
         "author": {"login": "reporter"},
-        "labels": {"nodes": [{"name": l} for l in (labels or [])]},
+        "labels": {"nodes": [{"name": label} for label in (labels or [])]},
         "comments": {"totalCount": comments_count},
     }
 
@@ -129,6 +156,7 @@ def make_philosophy(**kwargs):
 
 
 # ═══════════════════════ T1 (Rule Engine) ══════════════════════════════
+
 
 class TestT1_RuleEngine:
     """Verification Checklist → T1 (Rule Engine) section."""
@@ -170,13 +198,9 @@ class TestT1_RuleEngine:
         assert result.recommendation.action == RecommendationAction.CLOSE
 
         # Verify no_tests condition is handled in the code path
-        assert scanner._check_hard_rule(
-            HardRule("no_description", "reject", ""), make_pr(body="")
-        ) is True
+        assert scanner._check_hard_rule(HardRule("no_description", "reject", ""), make_pr(body="")) is True
         # no_tests returns False at T1 (correct: can't check without file list)
-        assert scanner._check_hard_rule(
-            HardRule("no_tests", "reject", ""), make_pr()
-        ) is False  # Deferred to T2/T3
+        assert scanner._check_hard_rule(HardRule("no_tests", "reject", ""), make_pr()) is False  # Deferred to T2/T3
 
     def test_docs_pr_merge_at_t1(self):
         """✅ A small documentation PR is recommended for merge at T1 (when conditions met)."""
@@ -212,6 +236,7 @@ class TestT1_RuleEngine:
 
 
 # ═══════════════════════ T2 (Smart Summary) ════════════════════════════
+
 
 class TestT2_SmartSummary:
     """Verification Checklist → T2 (Smart Summary) section."""
@@ -285,6 +310,7 @@ class TestT2_SmartSummary:
 
 # ═══════════════════════ T3 (Full Review) ══════════════════════════════
 
+
 class TestT3_FullReview:
     """Verification Checklist → T3 (Full Review) section."""
 
@@ -315,8 +341,7 @@ class TestT3_FullReview:
 
         # Generate 160 files
         files = [
-            {"filename": f"src/module_{i}.py", "status": "modified",
-             "patch": f"@@ -1,3 +1,5 @@\n+change {i}"}
+            {"filename": f"src/module_{i}.py", "status": "modified", "patch": f"@@ -1,3 +1,5 @@\n+change {i}"}
             for i in range(160)
         ]
 
@@ -390,6 +415,7 @@ class TestT3_FullReview:
 
 
 # ═══════════════════════ Issue Analysis ════════════════════════════════
+
 
 class TestIssueAnalysis:
     """Verification Checklist → Issue Analysis section."""
@@ -471,6 +497,7 @@ class TestIssueAnalysis:
 
 # ═══════════════════════ Incremental ═══════════════════════════════════
 
+
 class TestIncremental:
     """Verification Checklist → Incremental section."""
 
@@ -502,12 +529,21 @@ class TestIncremental:
     @pytest.mark.asyncio
     async def test_merged_queue_items_removed(self):
         """✅ Already-merged queue items are automatically removed."""
-        queue = QueueStore.__new__(QueueStore)
         items = [
-            Recommendation(number=1, item_type=ItemType.PR, action=RecommendationAction.MERGE,
-                           reason="", status=RecommendationStatus.PENDING),
-            Recommendation(number=2, item_type=ItemType.PR, action=RecommendationAction.HOLD,
-                           reason="", status=RecommendationStatus.PENDING),
+            Recommendation(
+                number=1,
+                item_type=ItemType.PR,
+                action=RecommendationAction.MERGE,
+                reason="",
+                status=RecommendationStatus.PENDING,
+            ),
+            Recommendation(
+                number=2,
+                item_type=ItemType.PR,
+                action=RecommendationAction.HOLD,
+                reason="",
+                status=RecommendationStatus.PENDING,
+            ),
         ]
 
         # Simulate removing stale item #1 (already merged)
@@ -516,7 +552,7 @@ class TestIncremental:
         assert remaining[0].number == 2
 
         # Verify remove_stale method exists and logic is correct
-        assert hasattr(QueueStore, 'remove_stale')
+        assert hasattr(QueueStore, "remove_stale")
 
     @pytest.mark.asyncio
     async def test_new_commits_trigger_reanalysis(self):
@@ -525,13 +561,15 @@ class TestIncremental:
         The IncrementalManager.get_delta fetches items updated since last_bark_time,
         which includes items with new commits (GitHub API returns updated items).
         """
+
         class DeltaGQL:
             async def fetch_issues_and_prs(self, owner, repo, since=None):
                 if since:
                     # Only return items updated after 'since' — this includes new commits
-                    return {"issues": [], "pull_requests": [
-                        {"number": 42, "additions": 1, "title": "Updated PR with new commit"}
-                    ]}
+                    return {
+                        "issues": [],
+                        "pull_requests": [{"number": 42, "additions": 1, "title": "Updated PR with new commit"}],
+                    }
                 return {"issues": [], "pull_requests": []}
 
         p = make_philosophy()
@@ -562,6 +600,7 @@ class TestIncremental:
 
 
 # ═══════════════════════ Cost Management ═══════════════════════════════
+
 
 class TestCostManagement:
     """Verification Checklist → Cost Management section."""
@@ -596,6 +635,7 @@ class TestCostManagement:
                         make_pr(number=1, title="Feature A", ci_state="SUCCESS"),
                     ],
                 }
+
             async def fetch_pr_files(self, owner, repo, number):
                 return []
 
@@ -624,14 +664,21 @@ class TestCostManagement:
 
 # ═══════════════════════ Queue Updates ═════════════════════════════════
 
+
 class TestQueueUpdates:
     """Verification Checklist → Queue Updates section."""
 
     def test_discussion_living_document_updated(self):
         """✅ Discussion Living Document is updated correctly."""
         items = [
-            Recommendation(number=1, item_type=ItemType.PR, action=RecommendationAction.MERGE,
-                           reason="CI passed", status=RecommendationStatus.PENDING, title="Add feature"),
+            Recommendation(
+                number=1,
+                item_type=ItemType.PR,
+                action=RecommendationAction.MERGE,
+                reason="CI passed",
+                status=RecommendationStatus.PENDING,
+                title="Add feature",
+            ),
         ]
         md = QueueStore._render_queue_markdown(items, mode="training")
 
@@ -643,15 +690,39 @@ class TestQueueUpdates:
     def test_pending_executed_failed_sections_separated(self):
         """✅ pending/executed/failed sections are separated correctly."""
         items = [
-            Recommendation(number=1, item_type=ItemType.PR, action=RecommendationAction.MERGE,
-                           reason="", status=RecommendationStatus.PENDING, title="A"),
-            Recommendation(number=2, item_type=ItemType.PR, action=RecommendationAction.MERGE,
-                           reason="", status=RecommendationStatus.EXECUTED, title="B"),
-            Recommendation(number=3, item_type=ItemType.PR, action=RecommendationAction.MERGE,
-                           reason="", status=RecommendationStatus.FAILED,
-                           failure_reason="merge conflict", title="C"),
-            Recommendation(number=4, item_type=ItemType.PR, action=RecommendationAction.HOLD,
-                           reason="", status=RecommendationStatus.EXPIRED, title="D"),
+            Recommendation(
+                number=1,
+                item_type=ItemType.PR,
+                action=RecommendationAction.MERGE,
+                reason="",
+                status=RecommendationStatus.PENDING,
+                title="A",
+            ),
+            Recommendation(
+                number=2,
+                item_type=ItemType.PR,
+                action=RecommendationAction.MERGE,
+                reason="",
+                status=RecommendationStatus.EXECUTED,
+                title="B",
+            ),
+            Recommendation(
+                number=3,
+                item_type=ItemType.PR,
+                action=RecommendationAction.MERGE,
+                reason="",
+                status=RecommendationStatus.FAILED,
+                failure_reason="merge conflict",
+                title="C",
+            ),
+            Recommendation(
+                number=4,
+                item_type=ItemType.PR,
+                action=RecommendationAction.HOLD,
+                reason="",
+                status=RecommendationStatus.EXPIRED,
+                title="D",
+            ),
         ]
 
         md = QueueStore._render_queue_markdown(items, mode="active")
@@ -681,6 +752,7 @@ class TestQueueUpdates:
 
 # ═══════════════════════ Approval Detection + Execution ════════════════
 
+
 class TestApprovalDetectionExecution:
     """Verification Checklist → Approval Detection + Execution section."""
 
@@ -694,9 +766,9 @@ class TestApprovalDetectionExecution:
 
         result = QueueStore._parse_checkboxes(md)
 
-        assert result[100] is True   # approved
+        assert result[100] is True  # approved
         assert result[200] is False  # not approved
-        assert result[300] is True   # approved
+        assert result[300] is True  # approved
 
     def test_dependencies_analyzed(self):
         """✅ Dependencies between approved items are analyzed (PR→Issue references)."""
@@ -713,10 +785,10 @@ class TestApprovalDetectionExecution:
         """✅ Optimal execution order is determined based on dependencies."""
         resolver = DependencyResolver()
         items = [
-            {"number": 99, "body": "Unrelated issue"},                          # other_issue
-            {"number": 50, "body": "Bug report"},                                # linked_issue
-            {"number": 102, "additions": 1, "body": "Another PR"},              # other_pr
-            {"number": 101, "additions": 1, "body": "fixes #50"},               # linked_pr
+            {"number": 99, "body": "Unrelated issue"},  # other_issue
+            {"number": 50, "body": "Bug report"},  # linked_issue
+            {"number": 102, "additions": 1, "body": "Another PR"},  # other_pr
+            {"number": 101, "additions": 1, "body": "fixes #50"},  # linked_pr
         ]
 
         result = resolver.resolve_order(items)
@@ -728,6 +800,7 @@ class TestApprovalDetectionExecution:
     @pytest.mark.asyncio
     async def test_partial_execution_failure_reporting(self):
         """✅ Partial execution + failure reporting works correctly."""
+
         class PartialFailREST(MockREST):
             async def merge_pr(self, owner, repo, number):
                 if number == 2:
@@ -752,13 +825,13 @@ class TestApprovalDetectionExecution:
     @pytest.mark.asyncio
     async def test_merge_conflict_recorded_as_failed(self):
         """✅ Merge conflict is recorded as failed."""
+
         class ConflictREST(MockREST):
             async def merge_pr(self, owner, repo, number):
                 raise Exception("405 method not allowed conflict")
 
         executor = Executor(ConflictREST())
-        rec = Recommendation(number=42, item_type=ItemType.PR,
-                             action=RecommendationAction.MERGE, reason="")
+        rec = Recommendation(number=42, item_type=ItemType.PR, action=RecommendationAction.MERGE, reason="")
 
         report = await executor.execute_batch("o", "r", [rec])
 
@@ -769,13 +842,13 @@ class TestApprovalDetectionExecution:
     @pytest.mark.asyncio
     async def test_branch_protection_error_message(self):
         """✅ Branch protection block is recorded with an appropriate error message."""
+
         class ProtectedREST(MockREST):
             async def merge_pr(self, owner, repo, number):
                 raise Exception("403 forbidden")
 
         executor = Executor(ProtectedREST())
-        rec = Recommendation(number=42, item_type=ItemType.PR,
-                             action=RecommendationAction.MERGE, reason="")
+        rec = Recommendation(number=42, item_type=ItemType.PR, action=RecommendationAction.MERGE, reason="")
 
         report = await executor.execute_batch("o", "r", [rec])
 
@@ -786,24 +859,27 @@ class TestApprovalDetectionExecution:
 
 # ═══════════════════════ Integration: Full Pipeline ════════════════════
 
+
 class TestFullPipelineIntegration:
     """End-to-end integration test of the bark pipeline."""
 
     @pytest.mark.asyncio
     async def test_full_bark_pipeline_e2e(self):
         """Full bark pipeline: fetch → T1 analyze → queue → report."""
+
         class GQLWithMixed:
             async def fetch_issues_and_prs(self, owner, repo, since=None):
                 return {
                     "issues": [
-                        make_issue(number=10, title="Old feature request",
-                                   updated_at="2024-01-01T00:00:00Z", comments_count=0),
+                        make_issue(
+                            number=10, title="Old feature request", updated_at="2024-01-01T00:00:00Z", comments_count=0
+                        ),
                     ],
                     "pull_requests": [
-                        make_pr(number=1, title="Fix readme typo", changed_files=1,
-                                ci_state="FAILURE"),
+                        make_pr(number=1, title="Fix readme typo", changed_files=1, ci_state="FAILURE"),
                     ],
                 }
+
             async def fetch_pr_files(self, owner, repo, number):
                 return []
 

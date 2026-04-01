@@ -6,13 +6,8 @@ Tests are numbered V01–V16 for traceability.
 
 from __future__ import annotations
 
-import asyncio
 import base64
-import signal
-import threading
-import time
-from io import StringIO
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -89,7 +84,8 @@ async def test_v01_sit_outputs_pre_analysis():
 def test_v02_contributing_triggers_confirmation_questions():
     """Repos with CONTRIBUTING.md get confirmation-style questions."""
     profile = RepoProfile(
-        owner="o", repo="r",
+        owner="o",
+        repo="r",
         has_contributing=True,
         contributing_content="# Contributing\nTests are required. Sign the CLA.",
     )
@@ -191,7 +187,7 @@ def test_v05_labels_detected_and_used():
 def test_v06_philosophy_created_from_interview():
     """Simulated interview creates a valid Philosophy with all components."""
     profile = RepoProfile(owner="o", repo="r", ci_workflows=["detected"])
-    interviewer = SitInterviewer(profile)
+    _interviewer = SitInterviewer(profile)
 
     # Simulate the interview logic (same as run_interactive but without prompts)
     hard_rules = []
@@ -263,16 +259,20 @@ async def test_v07_philosophy_saved_to_discussion():
     # Mock GraphQL and REST clients
     mock_gql = AsyncMock()
     mock_gql.list_discussions = AsyncMock(return_value=[])  # No existing discussion
-    mock_gql.list_discussion_categories = AsyncMock(return_value=[
-        {"id": "cat-1", "name": "General"},
-    ])
+    mock_gql.list_discussion_categories = AsyncMock(
+        return_value=[
+            {"id": "cat-1", "name": "General"},
+        ]
+    )
     mock_gql.get_repository_id = AsyncMock(return_value="repo-123")
-    mock_gql.create_discussion = AsyncMock(return_value={
-        "url": "https://github.com/owner/repo/discussions/1",
-        "id": "disc-1",
-        "number": 1,
-        "title": "🐕 Collie Philosophy",
-    })
+    mock_gql.create_discussion = AsyncMock(
+        return_value={
+            "url": "https://github.com/owner/repo/discussions/1",
+            "id": "disc-1",
+            "number": 1,
+            "title": "🐕 Collie Philosophy",
+        }
+    )
 
     mock_rest = AsyncMock()
     store = PhilosophyStore(mock_gql, mock_rest)
@@ -358,7 +358,8 @@ def test_v10_philosophy_has_tuning_parameters():
 def test_v11_mcp_sit_analyze_returns_guide():
     """generate_for_mcp() returns profile, interview_guide, and instructions."""
     profile = RepoProfile(
-        owner="myorg", repo="myrepo",
+        owner="myorg",
+        repo="myrepo",
         has_contributing=True,
         has_pr_template=True,
         has_codeowners=False,
@@ -614,6 +615,7 @@ def test_v16_interview_time_within_5_minutes():
 
     # Also verify skip is the default (speeds up interview)
     import inspect
+
     source = inspect.getsource(SitInterviewer.run_interactive)
     assert 'default="skip"' in source, "Prompt should default to 'skip' for speed"
 
