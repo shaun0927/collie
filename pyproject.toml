@@ -6,6 +6,19 @@ build-backend = "setuptools.build_meta"
 name = "collie"
 version = "0.1.0"
 description = "AI-powered GitHub repository triage for solo maintainers"
+license = {text = "MIT"}
+readme = "README.md"
+authors = [{name = "shaun0927"}]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+]
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.0",
@@ -15,6 +28,11 @@ dependencies = [
     "anthropic>=0.25",
     "mcp>=1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/shaun0927/collie"
+Repository = "https://github.com/shaun0927/collie"
+Issues = "https://github.com/shaun0927/collie/issues"
 
 [project.scripts]
 collie = "collie.cli.main:main"
