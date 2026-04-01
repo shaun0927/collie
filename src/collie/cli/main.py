@@ -300,6 +300,14 @@ async def _leash(owner: str, name: str, console: Console) -> None:
 
 
 @main.command()
+def mcp() -> None:
+    """Start the MCP server for Claude Desktop / Claude Code integration."""
+    from collie.mcp.server import main as mcp_main
+
+    asyncio.run(mcp_main())
+
+
+@main.command()
 @click.argument("repo")
 def status(repo: str) -> None:
     """Show triage status for the repository."""
