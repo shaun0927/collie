@@ -202,9 +202,7 @@ async def _dispatch(name, args, gql, rest, phil_store, queue_store) -> str:
             except Exception:
                 pass
 
-        report = await pipeline.run(
-            owner, repo, cost_cap=args.get("cost_cap", 50.0), progress_callback=_progress
-        )
+        report = await pipeline.run(owner, repo, cost_cap=args.get("cost_cap", 50.0), progress_callback=_progress)
         return report.summary()
 
     elif name == "collie_approve":
