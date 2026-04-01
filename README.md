@@ -165,6 +165,25 @@ jobs:
 
 ## Configuration
 
+### Config File (recommended)
+
+Create `~/.collie/config.yaml` to avoid setting environment variables every time:
+
+```yaml
+github_token: ghp_your_token_here
+anthropic_api_key: sk-ant-your_key_here
+default_repo: owner/repo
+```
+
+```bash
+mkdir -p ~/.collie
+chmod 700 ~/.collie
+# Create config.yaml with your tokens, then:
+chmod 600 ~/.collie/config.yaml
+```
+
+> **Security:** Collie warns if the config file is readable by others. Environment variables take precedence over the config file.
+
 ### Environment Variables
 
 | Variable | Required | Description |
