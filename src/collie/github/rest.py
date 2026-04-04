@@ -74,14 +74,14 @@ class GitHubREST:
             timeout=30.0,
         )
         self._graphql_client = httpx.AsyncClient(
-            base_url="https://api.github.com/graphql",
+            base_url="https://api.github.com",
             headers={"Authorization": f"bearer {token}", "Content-Type": "application/json"},
             timeout=30.0,
         )
 
     async def _graphql(self, query: str, variables: dict) -> dict:
         response = await _request_with_retry(
-            self._graphql_client, "POST", "", json={"query": query, "variables": variables}
+            self._graphql_client, "POST", "/graphql", json={"query": query, "variables": variables}
         )
         payload = response.json()
         if "errors" in payload:

@@ -108,17 +108,19 @@ Expected result:
   - `collie status shaun0927/collie-test-sandbox`
   - `collie bark shaun0927/collie-test-sandbox --cost-cap 1`
   - `collie approve shaun0927/collie-test-sandbox --all`
+- temporary live governance validation on `shaun0927/collie-test-sandbox`:
+  - draft PR blocked path (`Blocked: draft PR`)
+  - pending required checks -> auto-merge path (`Auto-merge enabled`)
+  - branch protection and repo settings restored afterward
 
 ### Not completed
-- protected-branch live blocked-path validation
-- live auto-merge path validation
 - live merge queue enqueue validation
 
 ## Why the remaining checks were not completed here
 
-During this validation pass, the accessible sandbox repository `shaun0927/collie-test-sandbox` reported `Branch not protected`, so it could not exercise the protected-branch / merge-queue / auto-merge governance scenarios directly.
+During this validation pass, `shaun0927/collie-test-sandbox` was temporarily configured with branch protection and auto-merge enabled so that live governance-aware execution could be exercised safely and then reverted.
 
-Those scenarios still need a purpose-built sandbox repository with the required GitHub settings enabled.
+The remaining unvalidated scenario is merge queue execution, which still needs a purpose-built sandbox repository with merge queue configured.
 
 ## Recommended next repositories / setups
 
