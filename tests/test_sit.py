@@ -481,6 +481,16 @@ async def test_repo_analyzer_enriches_profile_with_labels_and_repo_metadata():
                 },
             ]
 
+        async def get_rulesets(self, owner, repo):
+            return [
+                {
+                    "target": "branch",
+                    "enforcement": "active",
+                    "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+                    "rules": [{"type": "merge_queue"}],
+                }
+            ]
+
     analyzer = RepoAnalyzer(FakeREST())
     profile = await analyzer.analyze("owner", "repo")
 
@@ -495,6 +505,7 @@ async def test_repo_analyzer_enriches_profile_with_labels_and_repo_metadata():
     assert profile.stale_labels == ["stale"]
     assert profile.pr_template_fields == ["Summary", "Test plan"]
     assert profile.org_members == ["alice", "bob"]
+    assert profile.merge_queue_required is True
 
 
 def test_get_template_vars_uses_richer_profile_signals():
@@ -584,3 +595,16 @@ def test_repo_profile_defaults():
     assert profile.test_paths == []
     assert profile.lint_tools == []
     assert profile.issue_templates == []
+    assert profile.merge_queue_required is False
+
+
+def test_rulesets_require_merge_queue_matches_default_branch():
+    rulesets = [
+        {
+            "target": "branch",
+            "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+            "rules": [{"type": "merge_queue"}],
+        }
+    ]
+    assert RepoAnalyzer._rulesets_require_merge_queue(rulesets, "main") is True

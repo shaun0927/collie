@@ -112,22 +112,26 @@ Expected result:
   - draft PR blocked path (`Blocked: draft PR`)
   - pending required checks -> auto-merge path (`Auto-merge enabled`)
   - branch protection and repo settings restored afterward
+- merge-queue-required blocked path validation on `jh-ohmee/collie-merge-queue-sandbox`:
+  - org-owned public sandbox repository created
+  - active branch ruleset requiring merge queue applied
+  - live execution produced `Blocked: merge queue required` with execution path `blocked`
 
 ### Not completed
-- live merge queue enqueue validation
+- live merge queue enqueue-path validation
 
 ## Why the remaining checks were not completed here
 
 During this validation pass, `shaun0927/collie-test-sandbox` was temporarily configured with branch protection and auto-merge enabled so that live governance-aware execution could be exercised safely and then reverted.
 
-The remaining unvalidated scenario is merge queue execution, which still needs a purpose-built sandbox repository with merge queue configured.
+The remaining unvalidated scenario is the **successful enqueue path** (`Enqueued in merge queue`). The blocked merge-queue-required path has now been validated live.
 
 ## Recommended next repositories / setups
 
 Create or reuse a dedicated validation sandbox for each of the following:
 - `collie-protected-branch-sandbox`
 - `collie-auto-merge-sandbox`
-- `collie-merge-queue-sandbox`
+- `jh-ohmee/collie-merge-queue-sandbox` (already created for blocked-path validation)
 
 Each should contain:
 - Discussions enabled

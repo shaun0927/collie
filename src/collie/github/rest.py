@@ -298,6 +298,20 @@ class GitHubREST:
         data = await self._graphql(_DISCUSSION_CATEGORIES_QUERY, {"owner": owner, "repo": repo})
         return data["repository"]["discussionCategories"]["nodes"]
 
+    async def get_rulesets(self, owner: str, repo: str) -> list[dict]:
+        """List repository rulesets."""
+        try:
+            response = await _request_with_retry(
+                self.client,
+                "GET",
+                f"/repos/{owner}/{repo}/rulesets",
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (403, 404):
+                return []
+            raise
+        return response.json()
+
     async def create_discussion_category(self, owner: str, repo: str, name: str) -> dict:
         """Create a discussion category (uses REST endpoint if available, otherwise raises)."""
         # The GitHub REST API does not support creating discussion categories programmatically.

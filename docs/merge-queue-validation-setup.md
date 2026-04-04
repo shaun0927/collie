@@ -2,13 +2,15 @@
 
 This document explains how to complete the remaining live validation scenario for Collie's merge-queue execution path.
 
-## Why this is still pending
+## Current status
 
-The currently accessible validation repository (`shaun0927/collie-test-sandbox`) is a **user-owned** public repository.
+A dedicated organization-owned sandbox now exists:
 
-GitHub's merge queue feature is documented as available for selected repository types and plans, and in practice it is typically exercised through repository rulesets on repositories where merge queue is supported.
+- `jh-ohmee/collie-merge-queue-sandbox`
 
-Because the accessible sandbox in this session is not configured with merge queue, and because we did not have an organization-owned sandbox with merge queue support already enabled, the live `merge_queue` execution path could not be validated end-to-end here.
+Using that repository, the **blocked** merge-queue-required path was validated live.
+
+What is still pending is the **successful enqueue path** (`Enqueued in merge queue`), which requires a repository configuration and token combination that can actually place a PR into the queue.
 
 ## Recommended sandbox requirements
 
@@ -23,7 +25,7 @@ Create or prepare a dedicated repository with these properties:
 
 ## Suggested repository name
 
-- `collie-merge-queue-sandbox`
+- `jh-ohmee/collie-merge-queue-sandbox` (existing)
 
 ## One-time repository setup checklist
 

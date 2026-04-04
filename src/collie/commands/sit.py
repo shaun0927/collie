@@ -40,6 +40,7 @@ class RepoProfile:
     convention_hint: str = "unknown"
     security_areas: list[str] = field(default_factory=list)
     org_members: list[str] = field(default_factory=list)
+    merge_queue_required: bool = False
 
 
 class RepoAnalyzer:
@@ -163,6 +164,13 @@ class RepoAnalyzer:
             )
         )
 
+        if hasattr(self.rest, "get_rulesets"):
+            try:
+                rulesets = await self.rest.get_rulesets(owner, repo)
+            except Exception:
+                rulesets = []
+            profile.merge_queue_required = self._rulesets_require_merge_queue(rulesets, profile.default_branch)
+
         return profile
 
     @staticmethod
@@ -203,6 +211,28 @@ class RepoAnalyzer:
             return "[tool.black]" in lowered or "black" in lowered
         if tool == "prettier":
             return "prettier" in lowered or "prettier" in candidate.lower()
+        return False
+
+    @staticmethod
+    def _rulesets_require_merge_queue(rulesets: list[dict], default_branch: str) -> bool:
+        """Return whether any active branch ruleset requires merge queue on the default branch."""
+        target_ref = f"refs/heads/{default_branch}"
+        for ruleset in rulesets:
+            if ruleset.get("target") != "branch":
+                continue
+            if ruleset.get("enforcement") != "active":
+                continue
+            ref_name = (ruleset.get("conditions") or {}).get("ref_name") or {}
+            include = ref_name.get("include") or []
+            exclude = ref_name.get("exclude") or []
+            applies = not include or "~DEFAULT_BRANCH" in include or target_ref in include
+            if target_ref in exclude:
+                applies = False
+            if not applies:
+                continue
+            for rule in ruleset.get("rules") or []:
+                if rule.get("type") == "merge_queue":
+                    return True
         return False
 
 

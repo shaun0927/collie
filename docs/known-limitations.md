@@ -13,7 +13,7 @@ Still recommended:
 
 ## 2. Merge queue enqueue is only partially implemented
 
-The executor can distinguish merge-queue-required situations, but merge queue behavior still depends on GitHub support and token capabilities. Unsupported paths should surface blocked results clearly.
+The executor can distinguish merge-queue-required situations, and the **blocked** merge-queue-required path has been validated live. However, the actual queue enqueue success path still depends on GitHub support and token capabilities, and remains unvalidated in production-like conditions. Unsupported paths should surface blocked results clearly.
 
 ## 3. Structured analyzer outputs depend on provider compliance
 

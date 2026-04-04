@@ -43,6 +43,16 @@ class MockREST:
     async def list_recent_merged_pulls(self, owner, repo, limit=5):
         return []
 
+    async def get_rulesets(self, owner, repo):
+        return [
+            {
+                "target": "branch",
+                "enforcement": "active",
+                "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+                "rules": [{"type": "merge_queue"}],
+            }
+        ]
+
 
 class MockPhilosophyStore:
     def __init__(self, philosophy=None):
@@ -227,6 +237,29 @@ def test_attach_profile_context_includes_github_native_metadata():
     assert metadata.mergeable == "MERGEABLE"
     assert metadata.linked_issue_numbers == [5]
     assert metadata.required_check_state == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_attach_profile_context_marks_merge_queue_required_from_profile():
+    pipeline = BarkPipeline(MockGQL(), MockREST(), MockPhilosophyStore(Philosophy()), MockQueueStore())
+    from collie.commands.sit import RepoAnalyzer
+
+    profile = await pipeline._load_repo_profile("owner", "repo", RepoAnalyzer)
+    pr = {
+        "number": 12,
+        "title": "Queue path",
+        "body": "Body",
+        "additions": 1,
+        "deletions": 0,
+        "changedFiles": 1,
+        "author": {"login": "user"},
+        "labels": {"nodes": []},
+        "commits": {"nodes": [{"commit": {"oid": "abc", "statusCheckRollup": {"state": "SUCCESS"}}}]},
+        "repository": {"name": "repo", "owner": {"login": "owner"}},
+    }
+    enriched = pipeline._attach_profile_context(pr, profile, "owner", "repo")
+    metadata = GitHubItemMetadata.from_dict(enriched["github_metadata"])
+    assert metadata.merge_queue_required is True
 
 
 def test_bark_report_summary_includes_metadata_summary():

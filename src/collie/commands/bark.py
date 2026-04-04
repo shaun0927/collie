@@ -230,6 +230,8 @@ class BarkPipeline:
 
         enriched = dict(item)
         metadata = GitHubItemMetadata.from_github_item(enriched)
+        if getattr(profile, "merge_queue_required", False):
+            metadata.merge_queue_required = True
         enriched["github_metadata"] = metadata.to_dict()
         enriched.setdefault("repositoryName", f"{owner}/{repo}")
         enriched.setdefault("repositoryDescription", getattr(profile, "repo_description", ""))

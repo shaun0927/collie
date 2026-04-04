@@ -187,6 +187,18 @@ async def test_add_labels():
 
 
 @pytest.mark.asyncio
+async def test_get_rulesets():
+    rulesets = [{"id": 1, "name": "Require merge queue"}]
+    rest = GitHubREST(token="tok")
+    transport = _make_transport([_rest_response(rulesets)])
+    rest.client = httpx.AsyncClient(transport=transport, base_url="https://api.github.com")
+
+    result = await rest.get_rulesets("owner", "repo")
+    assert result == rulesets
+    await rest.close()
+
+
+@pytest.mark.asyncio
 async def test_get_repo_content_base64():
     import base64
 
