@@ -18,7 +18,8 @@
   <a href="#how-it-works">How It Works</a> |
   <a href="#why-teams-love-collie">For Teams</a> |
   <a href="#mcp-setup">MCP Setup</a> |
-  <a href="#github-action">GitHub Action</a>
+  <a href="#github-action">GitHub Action</a> |
+  <a href="#operator-guide">Operator Guide</a>
 </p>
 
 ---
@@ -63,8 +64,8 @@ All commands follow a dog training theme:
 |---------|-------------|
 | `collie sit <repo>` | **Interview** — Analyze your repo and create a merge philosophy through Q&A |
 | `collie bark <repo>` | **Triage** — Analyze all open issues/PRs and generate recommendations |
-| `collie approve <repo> <numbers...>` | **Execute** — Approve and run recommended actions (merge, close, label, comment) |
-| `collie approve <repo> --all` | **Execute all** — Approve all pending recommendations |
+| `collie approve <repo> <numbers...>` | **Execute** — Record verified approval(s) and run the selected recommendation(s) |
+| `collie approve <repo> --all` | **Execute all** — Execute all **verified** approvals |
 | `collie reject <repo> <number> -r "reason"` | **Reject** — Reject a recommendation and refine your philosophy |
 | `collie shake-hands <repo>` | **Revise** — Modify your merge philosophy |
 | `collie unleash <repo>` | **Activate** — Switch from training to active mode (enable execution) |
@@ -102,6 +103,8 @@ collie approve ──→ Execute ──→ GitHub API (merge, close, comment, la
 - Merge is only recommended when analysis is **100% complete**
 - Partial analysis (large diffs, unanalyzable files) → automatic **hold**
 - All actions require **human approval** before execution (belt + suspenders safety)
+- Verified approvals are bound to a recommendation payload, not just an item number
+- Governance-aware execution can choose **direct merge**, **auto-merge**, **merge queue**, or **blocked**
 
 ### Training Mode
 
@@ -130,14 +133,15 @@ Collie isn't just a triage bot. It's a **decision-making system** built on GitHu
 |---|---|---|
 | **CLI** | Maintainers triaging manually | `collie bark` in your terminal |
 | **MCP** | AI-assisted review with Claude | Claude calls `collie_approve` as a tool |
-| **GitHub Action** | Fully automated daily triage | Cron job runs `collie bark` every night |
+| **GitHub Action** | Scheduled queue refresh and triage | Cron job runs `collie bark` every night |
 
 ## Storage
 
 Collie uses **GitHub Discussions** as its only storage — no external database, no config server:
 
 - **Philosophy Discussion** — Your merge rules (YAML) + natural-language philosophy. Editable by anyone on the team. Version-tracked by GitHub's edit history.
-- **Queue Discussion** — A living document with recommendations, checkboxes for approval, and execution results. Toggle a checkbox to approve; the next bark run executes it.
+- **Queue Discussion** — A living document with recommendations and execution results. It remains human-readable, but canonical execution state is stored structurally alongside it.
+- Explicit `collie approve ...` is the canonical approval path; raw markdown checkboxes should be treated as UI state, not authoritative authorization.
 - Discussions are auto-created if you have admin access
 
 ## MCP Setup
@@ -149,7 +153,7 @@ Use Collie as an MCP server in Claude Desktop or Claude Code:
   "mcpServers": {
     "collie": {
       "command": "uvx",
-      "args": ["collie"],
+      "args": ["collie", "mcp"],
       "env": {
         "GITHUB_TOKEN": "ghp_your_token",
         "ANTHROPIC_API_KEY": "sk-ant-your_key"
@@ -163,7 +167,7 @@ Available MCP tools: `collie_sit_analyze`, `collie_sit_save`, `collie_bark`, `co
 
 ## GitHub Action
 
-Run Collie on a schedule with GitHub Actions:
+Run Collie on a schedule with GitHub Actions. The bundled Action runs `collie bark` to refresh recommendations and queue state; it should not be documented as a standalone autonomous execution engine.
 
 ```yaml
 # .github/workflows/collie.yml
@@ -258,13 +262,17 @@ tuning:
   cost_cap_per_bark: 50.0      # Max LLM cost in USD per bark run
 ```
 
+## Operator Guide
+
+See [`docs/operator-guide.md`](docs/operator-guide.md) for active-mode rollout guidance, approval semantics, and post-deploy checks.
+
 ## FAQ
 
 **Q: Is this only for solo maintainers?**
 A: No. Collie works for teams of any size. The Philosophy Discussion becomes your team's shared review standard — new members read it on day one, and every rejection makes it smarter.
 
 **Q: Can Collie merge PRs automatically?**
-A: Only after you `collie unleash` and explicitly `collie approve`. Collie never acts without human approval.
+A: Only after you `collie unleash` and use the verified approval flow (`collie approve ...`). Even in active mode, execution may resolve to direct merge, auto-merge, merge queue, or a blocked result depending on GitHub governance metadata.
 
 **Q: What if Collie recommends merging a bad PR?**
 A: Two safety layers: (1) merge is only recommended for fully analyzed PRs, (2) you must approve before execution. `collie reject -r "reason"` feeds back into the philosophy so the same mistake doesn't happen twice.

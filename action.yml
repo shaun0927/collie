@@ -1,5 +1,5 @@
 name: 'Collie Bark'
-description: 'AI-powered GitHub issue/PR triage — analyze, recommend, and execute'
+description: 'AI-powered GitHub issue/PR triage — analyze and refresh the recommendation queue'
 branding:
   icon: 'git-pull-request'
   color: 'blue'

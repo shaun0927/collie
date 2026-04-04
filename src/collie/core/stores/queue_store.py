@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 
-from collie.core.models import Recommendation, RecommendationStatus
+from collie.core.models import ApprovalRecord, Recommendation, RecommendationStatus
+
+STATE_BLOCK_START = "<!-- collie:queue-state"
+STATE_BLOCK_END = "-->"
 
 
 class QueueStore:
@@ -20,7 +24,10 @@ class QueueStore:
 
     async def upsert_recommendations(self, owner: str, repo: str, items: list[Recommendation]) -> str:
         """Add or update recommendations in the queue Discussion."""
-        existing_items = await self._load_items(owner, repo)
+        state = await self._load_state(owner, repo)
+        existing_items = state["items"]
+        approvals_by_number = state["approvals_by_number"]
+        meta = state["meta"]
 
         # Merge: update existing by number, add new ones
         existing_by_number = {item.number: item for item in existing_items}
@@ -28,7 +35,16 @@ class QueueStore:
             existing_by_number[item.number] = item
         merged = list(existing_by_number.values())
 
-        body = self._render_queue_markdown(merged)
+        valid_approvals = []
+        for item in merged:
+            approval = approvals_by_number.get(item.number)
+            if approval and approval.approved_payload_hash == item.payload_hash():
+                item.status = RecommendationStatus.APPROVED
+                valid_approvals.append(approval)
+            elif item.status == RecommendationStatus.APPROVED:
+                item.status = RecommendationStatus.PENDING
+
+        body = self._render_queue_markdown(merged, approvals=valid_approvals, meta=meta)
         discussion = await self._find_discussion(owner, repo)
 
         if discussion:
@@ -54,14 +70,91 @@ class QueueStore:
         checkboxes = self._parse_checkboxes(body)
         return [number for number, checked in checkboxes.items() if checked]
 
-    async def mark_executed(self, owner: str, repo: str, numbers: list[int], results: dict[int, str] | None = None):
-        """Move items from pending to executed (or failed with reason)."""
+    async def read_verified_approvals(self, owner: str, repo: str) -> list[int]:
+        """Return approval numbers backed by a verified approval record and matching payload hash."""
+        state = await self._load_state(owner, repo)
+        valid_numbers = []
+        for item in state["items"]:
+            approval = state["approvals_by_number"].get(item.number)
+            if approval and approval.approved_payload_hash == item.payload_hash():
+                valid_numbers.append(item.number)
+        return valid_numbers
+
+    async def record_approvals(
+        self, owner: str, repo: str, numbers: list[int], approver: str, source: str = "cli"
+    ) -> list[ApprovalRecord]:
+        """Persist verified approvals for the current canonical payload."""
+        state = await self._load_state(owner, repo)
+        approvals_by_number = state["approvals_by_number"]
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        created: list[ApprovalRecord] = []
+
+        for item in state["items"]:
+            if item.number in numbers:
+                record = ApprovalRecord(
+                    number=item.number,
+                    approver=approver,
+                    approved_payload_hash=item.payload_hash(),
+                    approved_at=now,
+                    source=source,
+                )
+                approvals_by_number[item.number] = record
+                item.status = RecommendationStatus.APPROVED
+                created.append(record)
+
+        await self._save_state(owner, repo, state["items"], list(approvals_by_number.values()), meta=state["meta"])
+        return created
+
+    async def get_actor_permission(self, owner: str, repo: str) -> tuple[str, str]:
+        """Return the current viewer identity and repository permission."""
+        return await self.gql.get_viewer_repository_permission(owner, repo)
+
+    async def read_incremental_state(self, owner: str, repo: str) -> dict:
+        """Load persisted incremental bark metadata."""
+        state = await self._load_state(owner, repo)
+        return dict(state["meta"])
+
+    async def write_incremental_state(self, owner: str, repo: str, meta: dict):
+        """Persist incremental bark metadata while preserving queue items and approvals."""
+        state = await self._load_state(owner, repo)
+        merged_meta = dict(state["meta"])
+        merged_meta.update(meta)
+        await self._save_state(owner, repo, state["items"], state["approvals"], meta=merged_meta)
+
+    async def get_recommendations(
+        self, owner: str, repo: str, numbers: list[int] | None = None
+    ) -> list[Recommendation]:
+        """Load canonical recommendations, optionally filtered by item number."""
         items = await self._load_items(owner, repo)
+        if numbers is None:
+            return items
+
+        wanted = set(numbers)
+        ordered = {n: idx for idx, n in enumerate(numbers)}
+        filtered = [item for item in items if item.number in wanted]
+        filtered.sort(key=lambda item: ordered.get(item.number, len(ordered)))
+        return filtered
+
+    async def mark_executed(
+        self,
+        owner: str,
+        repo: str,
+        numbers: list[int],
+        results: dict[int, str] | None = None,
+        execution_paths: dict[int, str] | None = None,
+    ):
+        """Move items from pending to executed (or failed with reason)."""
+        state = await self._load_state(owner, repo)
+        items = state["items"]
+        approvals_by_number = state["approvals_by_number"]
         results = results or {}
+        execution_paths = execution_paths or {}
         executed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
         for item in items:
             if item.number in numbers:
+                if item.number in execution_paths:
+                    item.execution_path = execution_paths[item.number]
                 if item.number in results and results[item.number].startswith("error:"):
                     item.status = RecommendationStatus.FAILED
                     item.failure_reason = results[item.number][len("error:") :].strip()
@@ -69,25 +162,45 @@ class QueueStore:
                     item.status = RecommendationStatus.EXECUTED
                     item.executed_at = executed_at
 
-        await self._save_items(owner, repo, items)
+        await self._save_state(owner, repo, items, list(approvals_by_number.values()), meta=state["meta"])
 
     async def invalidate_all(self, owner: str, repo: str):
         """Mark all pending items as expired (on philosophy change)."""
-        items = await self._load_items(owner, repo)
+        state = await self._load_state(owner, repo)
+        items = state["items"]
+        approvals_by_number = state["approvals_by_number"]
         for item in items:
             if item.status == RecommendationStatus.PENDING:
                 item.status = RecommendationStatus.EXPIRED
-        await self._save_items(owner, repo, items)
+        await self._save_state(owner, repo, items, list(approvals_by_number.values()), meta=state["meta"])
+
+    async def invalidate_numbers(self, owner: str, repo: str, numbers: list[int]):
+        """Expire specific queue items whose source state has drifted."""
+        state = await self._load_state(owner, repo)
+        items = state["items"]
+        approvals_by_number = state["approvals_by_number"]
+        stale = set(numbers)
+        for item in items:
+            if item.number in stale and item.status in (RecommendationStatus.PENDING, RecommendationStatus.APPROVED):
+                item.status = RecommendationStatus.EXPIRED
+        await self._save_state(owner, repo, items, list(approvals_by_number.values()), meta=state["meta"])
 
     async def remove_stale(self, owner: str, repo: str, numbers: list[int]):
         """Remove items that no longer exist (already merged/closed externally)."""
-        items = await self._load_items(owner, repo)
-        items = [item for item in items if item.number not in numbers]
-        await self._save_items(owner, repo, items)
+        state = await self._load_state(owner, repo)
+        items = [item for item in state["items"] if item.number not in numbers]
+        approvals = [approval for approval in state["approvals"] if approval.number not in numbers]
+        await self._save_state(owner, repo, items, approvals, meta=state["meta"])
 
     @staticmethod
-    def _render_queue_markdown(items: list[Recommendation], mode: str = "training", last_bark: str = "") -> str:
-        """Render the full queue as markdown."""
+    def _render_queue_markdown(
+        items: list[Recommendation],
+        approvals: list[ApprovalRecord] | None = None,
+        meta: dict | None = None,
+        mode: str = "training",
+        last_bark: str = "",
+    ) -> str:
+        """Render the full queue as markdown with a canonical structured state block."""
         pending = [i for i in items if i.status in (RecommendationStatus.PENDING, RecommendationStatus.APPROVED)]
         executed = [i for i in items if i.status == RecommendationStatus.EXECUTED]
         failed = [i for i in items if i.status == RecommendationStatus.FAILED]
@@ -124,7 +237,8 @@ class QueueStore:
             for item in executed:
                 item_label = _item_label(item)
                 action_str = item.action.value if hasattr(item.action, "value") else str(item.action)
-                lines.append(f"- [x] ~~{item_label} — {action_str}~~ ✅")
+                path_part = f" via {item.execution_path}" if item.execution_path else ""
+                lines.append(f"- [x] ~~{item_label} — {action_str}{path_part}~~ ✅")
         else:
             lines.append("_No executed items._")
         lines.append("")
@@ -134,8 +248,9 @@ class QueueStore:
         if failed:
             for item in failed:
                 item_label = _item_label(item)
+                path_part = f" [{item.execution_path}]" if item.execution_path else ""
                 reason_part = f" — {item.failure_reason}" if item.failure_reason else ""
-                lines.append(f"- ❌ {item_label}{reason_part}")
+                lines.append(f"- ❌ {item_label}{path_part}{reason_part}")
         else:
             lines.append("_No failed items._")
         lines.append("")
@@ -148,6 +263,22 @@ class QueueStore:
                 lines.append(f"- ⏰ {item_label} — expired (philosophy changed)")
         else:
             lines.append("_No expired items._")
+
+        lines.append("")
+        lines.append(STATE_BLOCK_START)
+        lines.append(
+            json.dumps(
+                {
+                    "version": 2,
+                    "items": [item.to_dict() for item in items],
+                    "approvals": [approval.to_dict() for approval in (approvals or [])],
+                    "meta": meta or {},
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        lines.append(STATE_BLOCK_END)
 
         return "\n".join(lines)
 
@@ -173,15 +304,37 @@ class QueueStore:
 
     async def _load_items(self, owner: str, repo: str) -> list[Recommendation]:
         """Load existing items from the queue Discussion."""
+        state = await self._load_state(owner, repo)
+        return state["items"]
+
+    async def _load_state(self, owner: str, repo: str) -> dict:
+        """Load canonical queue state including items and verified approvals."""
         discussion = await self._find_discussion(owner, repo)
         if discussion is None:
-            return []
+            return {"items": [], "approvals": [], "approvals_by_number": {}, "meta": {}}
         body = discussion.get("body", "")
-        return _parse_queue_markdown(body)
+        payload = _parse_state_block(body)
+        items = payload["items"] if payload is not None else _parse_queue_markdown(body)
+        approvals = payload["approvals"] if payload is not None else []
+        meta = payload["meta"] if payload is not None else {}
+        approvals_by_number = {approval.number: approval for approval in approvals}
+        return {"items": items, "approvals": approvals, "approvals_by_number": approvals_by_number, "meta": meta}
 
     async def _save_items(self, owner: str, repo: str, items: list[Recommendation]):
         """Save items back to the queue Discussion."""
-        body = self._render_queue_markdown(items)
+        state = await self._load_state(owner, repo)
+        await self._save_state(owner, repo, items, state["approvals"], meta=state["meta"])
+
+    async def _save_state(
+        self,
+        owner: str,
+        repo: str,
+        items: list[Recommendation],
+        approvals: list[ApprovalRecord],
+        meta: dict | None = None,
+    ):
+        """Save items and approvals back to the queue Discussion."""
+        body = self._render_queue_markdown(items, approvals=approvals, meta=meta or {})
         discussion = await self._find_discussion(owner, repo)
         if discussion:
             await self.gql.update_discussion_body(discussion["id"], body)
@@ -214,6 +367,18 @@ def _item_label(item: Recommendation) -> str:
 def _parse_queue_markdown(markdown: str) -> list[Recommendation]:
     """Parse queue markdown back into Recommendation objects (best-effort)."""
     from collie.core.models import ItemType, RecommendationAction
+
+    structured_state = _parse_state_block(markdown)
+    if structured_state is not None:
+        structured_items = structured_state["items"]
+        checkboxes = QueueStore._parse_checkboxes(markdown)
+        for item in structured_items:
+            if (
+                item.status in (RecommendationStatus.PENDING, RecommendationStatus.APPROVED)
+                and item.number in checkboxes
+            ):
+                item.status = RecommendationStatus.APPROVED if checkboxes[item.number] else RecommendationStatus.PENDING
+        return structured_items
 
     items: list[Recommendation] = []
 
@@ -301,3 +466,32 @@ def _parse_queue_markdown(markdown: str) -> list[Recommendation]:
         )
 
     return items
+
+
+def _parse_state_block(markdown: str) -> dict | None:
+    """Parse the canonical structured queue state block if present."""
+    match = re.search(r"<!--\s*collie:queue-state\s*\n(.*?)\n-->", markdown, re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        return None
+
+    raw_approvals = payload.get("approvals", [])
+    if not isinstance(raw_approvals, list):
+        return None
+
+    try:
+        return {
+            "items": [Recommendation.from_dict(item) for item in raw_items],
+            "approvals": [ApprovalRecord.from_dict(item) for item in raw_approvals],
+            "meta": payload.get("meta", {}),
+        }
+    except (KeyError, TypeError, ValueError):
+        return None

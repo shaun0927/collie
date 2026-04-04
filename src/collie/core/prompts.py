@@ -20,8 +20,7 @@ All prompts are designed for the Collie "bark" command — AI-powered triage and
 
 T2_SUMMARIZE_PROMPT = """\
 You are an expert open-source maintainer performing an initial triage review of a pull request.
-Your job is to give a structured, actionable summary — not to approve or reject the PR,
-but to surface the key signals a human reviewer needs.
+Your job is to give a structured, actionable summary that surfaces the key signals a human reviewer needs.
 
 You are reviewing this PR for the repository described below.
 
@@ -50,38 +49,33 @@ You are reviewing this PR for the repository described below.
 
 ---
 
-Analyze the PR and produce a structured triage summary using this exact format:
+Analyze the PR and respond with JSON only. Do not wrap the JSON in markdown.
 
-### Summary
-[2-3 sentences describing what this PR does and why, in plain language]
+Return an object with this schema:
+{{
+  "action": "merge" | "close" | "hold" | "escalate",
+  "confidence": 0.0-1.0,
+  "summary": "2-3 sentence summary",
+  "reasoning": "brief explanation of why this action is appropriate",
+  "hard_rule_checks": {{
+    "ci_passing": "PASS|FAIL|UNKNOWN: ...",
+    "linked_issue": "PASS|FAIL|UNKNOWN: ...",
+    "tests_included": "PASS|FAIL|UNKNOWN: ...",
+    "documentation_updated": "PASS|FAIL|UNKNOWN: ...",
+    "release_notes": "PASS|FAIL|UNKNOWN: ...",
+    "correct_target_branch": "PASS|FAIL|UNKNOWN: ..."
+  }},
+  "soft_signals": {{
+    "description_quality": "GOOD|NEEDS_IMPROVEMENT|POOR: ...",
+    "size": "WELL_SCOPED|LARGE|TOO_LARGE: ...",
+    "breaking_change_risk": "NONE|LOW|MEDIUM|HIGH: ...",
+    "test_coverage": "STRONG|ADEQUATE|WEAK|MISSING: ...",
+    "code_style": "CLEAN|MINOR_ISSUES|UNKNOWN: ..."
+  }},
+  "questions_for_author": ["question 1", "question 2"]
+}}
 
-### Hard Rule Checks
-For each item below, answer PASS / FAIL / UNKNOWN with a one-line reason:
-- CI passing: {ci_status_detail}
-- Linked issue or ticket: [is there a referenced issue number or ticket?]
-- Tests included: [are there new or modified test files?]
-- Documentation updated: [for user-facing changes, is docs updated?]
-- Changelog/release notes: [for user-facing changes, is there a release note?]
-- Correct target branch: [does the PR target the expected base branch?]
-
-### Soft Signal Assessment
-- PR description quality: [GOOD / NEEDS IMPROVEMENT / POOR — explain why]
-- PR size appropriateness: [WELL-SCOPED / LARGE / TOO LARGE — note if splitting is recommended]
-- Breaking change risk: [NONE / LOW / MEDIUM / HIGH — what could break for existing users?]
-- Test coverage signal: [STRONG / ADEQUATE / WEAK / MISSING]
-- Code style / lint: [based on diff, any obvious style violations?]
-
-### Review Recommendation
-[ONE of: APPROVE / REQUEST_CHANGES / NEEDS_DISCUSSION / ESCALATE]
-
-Reasoning (2-4 sentences): [Why this recommendation? What must change before merge?]
-
-### Questions for Author
-[List 0-3 specific questions a reviewer should ask the author, based on gaps found above.
-If none, write "None — ready for detailed review."]
-
-Be direct and concrete. Do not hedge with "it seems" or "might be". If you cannot determine
-something from the information provided, say UNKNOWN and explain what additional data is needed.
+Hard Rule Checks must reflect the checklist above. If you cannot determine something, use UNKNOWN with an explanation.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -122,60 +116,19 @@ code quality without being pedantic about irrelevant style issues.
 
 ---
 
-Produce a thorough code review in the following format:
+Review the provided diff and respond with JSON only. Do not wrap the JSON in markdown.
 
-### Overall Assessment
-[APPROVE / REQUEST_CHANGES / COMMENT — with 2-3 sentence justification]
+Return an object with this schema:
+{{
+  "has_issue": true | false,
+  "summary": "brief review summary for this file",
+  "issue_category": "correctness|tests|security|performance|quality|docs|none",
+  "merge_blocker": true | false,
+  "details": "specific explanation, including concrete concern if any",
+  "suggested_fix": "specific follow-up or empty string"
+}}
 
-### Correctness
-[Identify any logic errors, off-by-one errors, incorrect assumptions, or edge cases
-not handled. Reference specific line numbers or functions. If none found, say "No correctness
-issues identified."]
-
-### Test Coverage
-[Are the tests meaningful and sufficient? Do they cover the happy path AND edge cases?
-Are there untested branches? Reference specific test functions or missing scenarios.
-Kubernetes, React, and Django all require tests that demonstrate the fix works AND
-that regressions are prevented.]
-
-### Backward Compatibility
-[Does this change break any existing public API, behavior, or contract?
-Even internal changes can break callers. Identify any function signature changes,
-removed exports, changed return types, or altered side effects.
-Rate risk: NONE / LOW / MEDIUM / HIGH]
-
-### Security Considerations
-[Does this change touch: authentication, authorization, input validation, SQL queries,
-file system operations, external HTTP calls, cryptography, secrets, or user data?
-If yes, identify the specific concern. If not applicable, say "No security-sensitive
-changes detected."]
-
-### Performance Implications
-[Does this change introduce N+1 queries, unbounded loops, large allocations, or
-synchronous I/O in a hot path? React is particularly sensitive to render performance;
-Next.js cares about bundle size; Django cares about ORM query count.
-If not applicable, say "No performance concerns identified."]
-
-### Code Quality
-[Identify any: duplicated logic that could be extracted, overly complex conditionals,
-misleading variable names, missing error handling, or unclear abstractions.
-Be specific — quote the problematic code if possible.]
-
-### Documentation
-[For user-facing changes: is the documentation (README, API docs, CHANGELOG) updated?
-For internal changes: are complex sections commented?]
-
-### Inline Suggestions
-[List 0-5 specific, actionable suggestions in this format:
-- File: {filename}, Line ~{line}: [current code] → [suggested change] — [reason]
-If no suggestions, write "None — code quality is acceptable as-is."]
-
-### Merge Criteria
-[Explicitly list what must be done before this PR can be merged:
-1. [requirement]
-2. [requirement]
-...
-If ready as-is, write "Ready to merge — no changes required."]
+If there is no issue, set `has_issue` to false, `issue_category` to `none`, and keep the summary concise.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -210,53 +163,29 @@ Your goal is to classify the issue, assess its quality, and recommend the next a
 
 ---
 
-Analyze the issue and respond in this exact format:
+Analyze the issue and respond with JSON only. Do not wrap the JSON in markdown.
 
-### Issue Classification
-Type: [BUG / FEATURE_REQUEST / QUESTION / DOCUMENTATION / PERFORMANCE / SECURITY / MAINTENANCE / UNCLEAR]
-Confidence: [HIGH / MEDIUM / LOW]
-Reason: [one sentence]
+Return an object with this schema:
+{{
+  "classification": "BUG|FEATURE_REQUEST|QUESTION|DOCUMENTATION|PERFORMANCE|SECURITY|MAINTENANCE|UNCLEAR",
+  "confidence": "HIGH|MEDIUM|LOW",
+  "quality": {{
+    "reproduction": "YES|NO|PARTIAL",
+    "version_specified": "YES|NO",
+    "expected_vs_actual": "CLEAR|UNCLEAR|MISSING",
+    "minimal_example": "YES|NO|NOT_APPLICABLE",
+    "overall": "COMPLETE|NEEDS_INFO|POOR"
+  }},
+  "duplicate_assessment": "LIKELY_DUPLICATE|POSSIBLE_DUPLICATE|NO_DUPLICATE_FOUND",
+  "component": "component or area name",
+  "priority": "CRITICAL|HIGH|MEDIUM|LOW",
+  "action": "close|label|comment|hold",
+  "reason": "brief explanation",
+  "suggested_labels": ["label-1", "label-2"],
+  "response_template": "brief maintainer response"
+}}
 
-### Quality Assessment
-- Reproduction provided: [YES / NO / PARTIAL]
-- Version specified: [YES / NO]
-- Expected vs. actual behavior: [CLEAR / UNCLEAR / MISSING]
-- Minimal example: [YES / NO / NOT_APPLICABLE]
-- Overall quality: [COMPLETE / NEEDS_INFO / POOR]
-
-### Duplicate Check
-[LIKELY_DUPLICATE: #{issue_number} — [reason] | POSSIBLE_DUPLICATE: #{issue_number} — [reason] | NO_DUPLICATE_FOUND]
-
-### Component / Area
-[Which part of the codebase does this affect? Suggest the appropriate area/component label.]
-
-### Priority Signal
-[CRITICAL (data loss / security / crashes) / HIGH (core functionality broken) /
-MEDIUM (feature not working as expected) / LOW (enhancement / cosmetic)]
-
-Reason: [one sentence]
-
-### Recommended Action
-[ONE of the following:]
-- CONFIRM_BUG: [what to do next — assign to component, add labels, ask for version]
-- REQUEST_REPRODUCTION: [what specific reproduction information is missing]
-- REQUEST_INFO: [what specific information is missing]
-- CLOSE_DUPLICATE: [reference the duplicate issue number]
-- CLOSE_WONTFIX: [explain why this does not align with project direction]
-- CLOSE_QUESTION: [redirect to appropriate support channel]
-- ESCALATE_SECURITY: [this issue may have security implications — do not discuss publicly]
-- ADD_TO_BACKLOG: [valid request but low priority — add appropriate labels]
-- COMMUNITY_FEEDBACK: [needs community input before a decision can be made]
-
-### Suggested Labels
-[List 1-4 labels from the available labels that should be applied. Format: `label-name`]
-
-### Response Template
-[Draft a brief (3-6 sentence) response to post on the issue. Be helpful and specific.
-For bugs: confirm you can reproduce or ask for reproduction.
-For features: acknowledge the request and explain the next step.
-For questions: redirect appropriately.
-Never be dismissive. Every issue author took time to report something.]
+Only choose `close` when the issue should truly be closed. Use `hold` when more information or human review is required.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────

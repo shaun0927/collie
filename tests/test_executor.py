@@ -3,7 +3,7 @@
 import pytest
 
 from collie.core.executor import ExecutionReport, ExecutionStatus, Executor
-from collie.core.models import ItemType, Recommendation, RecommendationAction
+from collie.core.models import GitHubItemMetadata, ItemType, Recommendation, RecommendationAction
 
 
 def make_rec(number: int, action: RecommendationAction, **kwargs) -> Recommendation:
@@ -16,6 +16,8 @@ class MockREST:
         self.closed = []
         self.comments = []
         self.labels = []
+        self.auto_merge_enabled = []
+        self.merge_queue = []
 
     async def merge_pr(self, owner, repo, number):
         self.merged.append(number)
@@ -32,6 +34,14 @@ class MockREST:
     async def add_labels(self, owner, repo, number, labels):
         self.labels.append((number, labels))
         return {}
+
+    async def enable_auto_merge(self, pull_request_id, merge_method="SQUASH"):
+        self.auto_merge_enabled.append((pull_request_id, merge_method))
+        return {"id": pull_request_id}
+
+    async def enqueue_pull_request(self, pull_request_id):
+        self.merge_queue.append(pull_request_id)
+        return {"id": pull_request_id}
 
 
 class FailingREST(MockREST):
@@ -53,6 +63,7 @@ async def test_successful_merge():
     assert len(report.succeeded) == 1
     assert report.succeeded[0].number == 42
     assert report.succeeded[0].message == "Merged"
+    assert report.succeeded[0].execution_path == "direct_merge"
     assert 42 in rest.merged
 
 
@@ -66,6 +77,7 @@ async def test_merge_conflict_returns_failed_result():
     assert len(report.failed) == 1
     assert report.failed[0].number == 42
     assert "conflict" in report.failed[0].message.lower()
+    assert report.failed[0].execution_path == "blocked"
 
 
 @pytest.mark.asyncio
@@ -77,6 +89,82 @@ async def test_merge_403_branch_protection():
 
     assert len(report.failed) == 1
     assert "protection" in report.failed[0].message.lower()
+    assert report.failed[0].execution_path == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_draft_pr_is_blocked_before_merge_attempt():
+    rest = MockREST()
+    executor = Executor(rest)
+    metadata = GitHubItemMetadata(is_draft=True).to_dict()
+    rec = make_rec(43, RecommendationAction.MERGE, github_metadata=metadata)
+    report = await executor.execute_batch("owner", "repo", [rec])
+
+    assert len(report.failed) == 1
+    assert report.failed[0].message == "Blocked: draft PR"
+    assert rest.merged == []
+
+
+@pytest.mark.asyncio
+async def test_required_checks_pending_enable_auto_merge():
+    rest = MockREST()
+    executor = Executor(rest)
+    metadata = GitHubItemMetadata(
+        pull_request_id="PR_kw123",
+        required_check_state="PENDING",
+        mergeable="MERGEABLE",
+    ).to_dict()
+    rec = make_rec(44, RecommendationAction.MERGE, github_metadata=metadata)
+    report = await executor.execute_batch("owner", "repo", [rec])
+
+    assert len(report.succeeded) == 1
+    assert report.succeeded[0].message == "Auto-merge enabled"
+    assert report.succeeded[0].execution_path == "auto_merge"
+    assert rest.auto_merge_enabled == [("PR_kw123", "SQUASH")]
+    assert rest.merged == []
+
+
+@pytest.mark.asyncio
+async def test_merge_queue_path_enqueues_pull_request():
+    rest = MockREST()
+    executor = Executor(rest)
+    metadata = GitHubItemMetadata(
+        pull_request_id="PR_kw456",
+        merge_queue_required=True,
+        mergeable="MERGEABLE",
+        required_check_state="SUCCESS",
+    ).to_dict()
+    rec = make_rec(45, RecommendationAction.MERGE, github_metadata=metadata)
+    report = await executor.execute_batch("owner", "repo", [rec])
+
+    assert len(report.succeeded) == 1
+    assert report.succeeded[0].message == "Enqueued in merge queue"
+    assert report.succeeded[0].execution_path == "merge_queue"
+    assert rest.merge_queue == ["PR_kw456"]
+    assert rest.merged == []
+
+
+@pytest.mark.asyncio
+async def test_merge_queue_required_without_enqueue_support_blocks():
+    class NoQueueREST(MockREST):
+        async def enqueue_pull_request(self, pull_request_id):
+            raise AttributeError
+
+    rest = NoQueueREST()
+    del rest.merge_queue
+    executor = Executor(rest)
+    metadata = GitHubItemMetadata(
+        pull_request_id="PR_kw789",
+        merge_queue_required=True,
+        mergeable="MERGEABLE",
+        required_check_state="SUCCESS",
+    ).to_dict()
+    rec = make_rec(46, RecommendationAction.MERGE, github_metadata=metadata)
+    report = await executor.execute_batch("owner", "repo", [rec])
+
+    assert len(report.failed) == 1
+    assert report.failed[0].message == "Blocked: merge queue required"
+    assert report.failed[0].execution_path == "blocked"
 
 
 @pytest.mark.asyncio

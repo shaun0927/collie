@@ -6,6 +6,7 @@ Run: pytest tests/test_issue6_verification.py -v
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import pytest
@@ -27,7 +28,7 @@ from collie.core.models import (
     RecommendationStatus,
     TuningParams,
 )
-from collie.core.prompts import ISSUE_ANALYZE_PROMPT, T2_SUMMARIZE_PROMPT
+from collie.core.prompts import ISSUE_ANALYZE_PROMPT
 from collie.core.stores.queue_store import QueueStore
 
 # ═══════════════════════ Helpers ═══════════════════════════════════════
@@ -41,6 +42,56 @@ class MockLLM:
     async def chat(self, system: str, user: str) -> str:
         self.calls.append({"system": system, "user": user})
         return self._response
+
+
+def make_t2_response(action: str = "hold", confidence: float = 0.5, reasoning: str = "Reason"):
+    return json.dumps(
+        {
+            "action": action,
+            "confidence": confidence,
+            "summary": "Summary",
+            "reasoning": reasoning,
+            "hard_rule_checks": {},
+            "soft_signals": {},
+            "questions_for_author": [],
+        }
+    )
+
+
+def make_t3_response(has_issue: bool = False, details: str = "No issues found."):
+    return json.dumps(
+        {
+            "has_issue": has_issue,
+            "summary": details,
+            "issue_category": "quality" if has_issue else "none",
+            "merge_blocker": has_issue,
+            "details": details,
+            "suggested_fix": "",
+        }
+    )
+
+
+def make_issue_response(action: str = "hold", reason: str = "Needs review", labels: list[str] | None = None):
+    return json.dumps(
+        {
+            "classification": "BUG",
+            "confidence": "HIGH",
+            "quality": {
+                "reproduction": "YES",
+                "version_specified": "YES",
+                "expected_vs_actual": "CLEAR",
+                "minimal_example": "YES",
+                "overall": "COMPLETE",
+            },
+            "duplicate_assessment": "NO_DUPLICATE_FOUND",
+            "component": "core",
+            "priority": "MEDIUM",
+            "action": action,
+            "reason": reason,
+            "suggested_labels": labels or [],
+            "response_template": "Thanks for the report.",
+        }
+    )
 
 
 class MockGQL:
@@ -244,7 +295,7 @@ class TestT2_SmartSummary:
     @pytest.mark.asyncio
     async def test_phase0_prompt_template_applied(self):
         """✅ Phase 0 prompt template is applied to the LLM call."""
-        llm = MockLLM("Recommendation: hold\nConfidence: 90%")
+        llm = MockLLM(make_t2_response(action="hold", confidence=0.9, reasoning="Need review."))
         summarizer = T2Summarizer(llm_client=llm)
         pr = make_pr()
         philosophy = make_philosophy()
@@ -252,16 +303,16 @@ class TestT2_SmartSummary:
         await summarizer.summarize(pr, philosophy)
 
         assert len(llm.calls) == 1
-        # T2_SUMMARIZE_PROMPT is used as the system prompt
-        assert llm.calls[0]["system"] == T2_SUMMARIZE_PROMPT
-        # Verify Phase 0 research basis markers in the prompt
-        assert "expert open-source maintainer" in T2_SUMMARIZE_PROMPT
-        assert "Hard Rule Checks" in T2_SUMMARIZE_PROMPT
+        assert "expert open-source maintainer" in llm.calls[0]["system"]
+        assert "Hard Rule Checks" in llm.calls[0]["system"]
+        assert "{repo_philosophy}" not in llm.calls[0]["system"]
+        assert "Feature X" in llm.calls[0]["system"]
+        assert "Return only valid JSON" in llm.calls[0]["user"]
 
     @pytest.mark.asyncio
     async def test_summary_recommendation_confidence_parsed(self):
         """✅ Summary + recommendation + confidence are parsed from the LLM response."""
-        llm = MockLLM("Recommendation: merge\nConfidence: 95%\nThis PR is well-tested.")
+        llm = MockLLM(make_t2_response(action="merge", confidence=0.95, reasoning="This PR is well-tested."))
         summarizer = T2Summarizer(llm_client=llm)
         pr = make_pr()
         philosophy = make_philosophy()
@@ -279,7 +330,7 @@ class TestT2_SmartSummary:
         In the bark pipeline: T2 merge with low confidence → needs_t3 = True → T3 review.
         At the T2 level: confidence < 80% + merge → action changed to HOLD.
         """
-        llm = MockLLM("Recommendation: merge\nConfidence: 55%\nNot sure about this.")
+        llm = MockLLM(make_t2_response(action="merge", confidence=0.55, reasoning="Not sure about this."))
         summarizer = T2Summarizer(llm_client=llm)
         pr = make_pr()
         philosophy = make_philosophy()
@@ -317,7 +368,7 @@ class TestT3_FullReview:
     @pytest.mark.asyncio
     async def test_entire_diff_passed_to_llm(self):
         """✅ Entire diff is passed to the LLM context."""
-        llm = MockLLM("Looks good. No issues found.")
+        llm = MockLLM(make_t3_response(has_issue=False, details="No issues found."))
         reviewer = T3Reviewer(llm_client=llm)
         pr = make_pr()
         files = [
@@ -335,7 +386,7 @@ class TestT3_FullReview:
     @pytest.mark.asyncio
     async def test_large_diffs_split_file_by_file(self):
         """✅ Large diffs (150+ files) are split and analyzed file by file."""
-        llm = MockLLM("No issues.")
+        llm = MockLLM(make_t3_response(has_issue=False, details="No issues."))
         reviewer = T3Reviewer(llm_client=llm)
         pr = make_pr()
 
@@ -355,7 +406,7 @@ class TestT3_FullReview:
     @pytest.mark.asyncio
     async def test_unanalyzable_files_flagged(self):
         """✅ Files that cannot be analyzed are explicitly flagged."""
-        llm = MockLLM("Looks fine.")
+        llm = MockLLM(make_t3_response(has_issue=False, details="Looks fine."))
         reviewer = T3Reviewer(llm_client=llm)
         pr = make_pr()
         files = [
@@ -373,7 +424,7 @@ class TestT3_FullReview:
     @pytest.mark.asyncio
     async def test_only_100pct_analyzed_get_merge(self):
         """✅ Only fully analyzed (100%) PRs receive a merge recommendation."""
-        llm = MockLLM("Clean code. No issues.")
+        llm = MockLLM(make_t3_response(has_issue=False, details="Clean code. No issues."))
         reviewer = T3Reviewer(llm_client=llm)
         pr = make_pr()
 
@@ -396,7 +447,7 @@ class TestT3_FullReview:
     @pytest.mark.asyncio
     async def test_partial_analysis_coverage_noted(self):
         """✅ Partially analyzed PRs are classified as hold with '120/150 analyzed' noted."""
-        llm = MockLLM("Looks fine.")
+        llm = MockLLM(make_t3_response(has_issue=False, details="Looks fine."))
         reviewer = T3Reviewer(llm_client=llm)
         pr = make_pr()
 
@@ -460,10 +511,7 @@ class TestIssueAnalysis:
         The IssueAnalyzer._parse_issue_response detects 'comment' + 'respond'
         keywords → COMMENT action.
         """
-        llm = MockLLM(
-            "This is a common question. Recommend: comment and respond with FAQ link. "
-            "Please check the documentation at docs/faq.md."
-        )
+        llm = MockLLM(make_issue_response(action="comment", reason="FAQ-style support request."))
         analyzer = IssueAnalyzer(llm_client=llm)
         issue = make_issue(
             title="How do I configure X?",
@@ -475,6 +523,7 @@ class TestIssueAnalysis:
 
         assert result.recommendation.action == RecommendationAction.COMMENT
         assert result.tier == Tier.T2
+        assert result.recommendation.suggested_comment == "Thanks for the report."
 
     @pytest.mark.asyncio
     async def test_label_suggestions_reference_repo_labels(self):
@@ -484,15 +533,16 @@ class TestIssueAnalysis:
         so the LLM is informed of existing repo labels and constrains its suggestions.
         """
         assert "{available_labels}" in ISSUE_ANALYZE_PROMPT
-        assert "Suggest" in ISSUE_ANALYZE_PROMPT and "labels" in ISSUE_ANALYZE_PROMPT
+        assert "suggested_labels" in ISSUE_ANALYZE_PROMPT
 
         # Also verify the label action flow works
-        llm = MockLLM("This needs a label: bug/confirmed. Add label to the issue.")
+        llm = MockLLM(make_issue_response(action="label", reason="Bug confirmed.", labels=["bug", "confirmed"]))
         analyzer = IssueAnalyzer(llm_client=llm)
         issue = make_issue(updated_at="2026-03-01T00:00:00Z")
 
         result = await analyzer.analyze(issue, make_philosophy())
         assert result.recommendation.action == RecommendationAction.LABEL
+        assert result.recommendation.suggested_labels == ["bug", "confirmed"]
 
 
 # ═══════════════════════ Incremental ═══════════════════════════════════

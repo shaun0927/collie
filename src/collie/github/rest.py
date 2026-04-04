@@ -56,6 +56,14 @@ query($owner: String!, $repo: String!) {
 }
 """
 
+_ENABLE_AUTO_MERGE_MUTATION = """
+mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!) {
+  enablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId, mergeMethod: $mergeMethod}) {
+    pullRequest { id autoMergeRequest { enabledAt } }
+  }
+}
+"""
+
 
 class GitHubREST:
     def __init__(self, token: str):
@@ -164,6 +172,98 @@ class GitHubREST:
             raise
         return response.json()
 
+    async def get_repository(self, owner: str, repo: str) -> dict | None:
+        """Get repository metadata such as default branch and description."""
+        try:
+            response = await _request_with_retry(
+                self.client,
+                "GET",
+                f"/repos/{owner}/{repo}",
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise
+        return response.json()
+
+    async def list_labels(self, owner: str, repo: str, limit: int = 100) -> list[str]:
+        """List repository labels by name."""
+        try:
+            response = await _request_with_retry(
+                self.client,
+                "GET",
+                f"/repos/{owner}/{repo}/labels",
+                params={"per_page": limit},
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return []
+            raise
+        data = response.json()
+        return [label.get("name", "") for label in data if label.get("name")]
+
+    async def list_recent_merged_pulls(self, owner: str, repo: str, limit: int = 5) -> list[dict]:
+        """Return recent merged pull requests with lightweight review stats."""
+        try:
+            response = await _request_with_retry(
+                self.client,
+                "GET",
+                f"/repos/{owner}/{repo}/pulls",
+                params={"state": "closed", "sort": "updated", "direction": "desc", "per_page": max(limit * 3, 10)},
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return []
+            raise
+
+        pulls = response.json()
+        merged = [pull for pull in pulls if pull.get("merged_at")][:limit]
+        results: list[dict] = []
+
+        for pull in merged:
+            number = pull.get("number")
+            if number is None:
+                continue
+
+            detail = pull
+            try:
+                detail_resp = await _request_with_retry(
+                    self.client,
+                    "GET",
+                    f"/repos/{owner}/{repo}/pulls/{number}",
+                )
+                detail = detail_resp.json()
+            except httpx.HTTPStatusError:
+                pass
+
+            approval_count = 0
+            try:
+                reviews_resp = await _request_with_retry(
+                    self.client,
+                    "GET",
+                    f"/repos/{owner}/{repo}/pulls/{number}/reviews",
+                    params={"per_page": 100},
+                )
+                reviews = reviews_resp.json()
+                approval_count = sum(1 for review in reviews if review.get("state") == "APPROVED")
+            except httpx.HTTPStatusError:
+                approval_count = 0
+
+            results.append(
+                {
+                    "number": number,
+                    "title": detail.get("title", pull.get("title", "")),
+                    "author": (detail.get("user") or pull.get("user") or {}).get("login", "unknown"),
+                    "merged_at": detail.get("merged_at", pull.get("merged_at", "")),
+                    "additions": detail.get("additions", 0),
+                    "deletions": detail.get("deletions", 0),
+                    "changed_files": detail.get("changed_files", 0),
+                    "approval_count": approval_count,
+                }
+            )
+
+        return results
+
     async def create_discussion(self, owner: str, repo: str, category_id: str, title: str, body: str) -> dict:
         """Create a new discussion via GraphQL mutation."""
         # First get repository node ID
@@ -206,6 +306,18 @@ class GitHubREST:
             "GitHub does not support creating discussion categories via API. "
             "Please create the category manually in the repository settings."
         )
+
+    async def enable_auto_merge(self, pull_request_id: str, merge_method: str = "SQUASH") -> dict:
+        """Enable auto-merge for a pull request via GraphQL."""
+        data = await self._graphql(
+            _ENABLE_AUTO_MERGE_MUTATION,
+            {"pullRequestId": pull_request_id, "mergeMethod": merge_method},
+        )
+        return data["enablePullRequestAutoMerge"]["pullRequest"]
+
+    async def enqueue_pull_request(self, pull_request_id: str):
+        """Placeholder for merge queue enqueue support."""
+        raise NotImplementedError("GitHub merge queue enqueue is not implemented yet for this client.")
 
     async def close(self):
         await self.client.aclose()

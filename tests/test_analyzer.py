@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from collie.core.analyzer import AnalysisResult, IssueAnalyzer, T1Scanner, T2Summarizer, T3Reviewer, Tier
@@ -64,6 +66,58 @@ def make_issue(
 
 def make_philosophy(hard_rules: list[HardRule] | None = None, soft_text: str = "") -> Philosophy:
     return Philosophy(hard_rules=hard_rules or [], soft_text=soft_text)
+
+
+def make_t2_response(
+    action: str = "hold", confidence: float = 0.5, summary: str = "Summary", reasoning: str = "Reason"
+):
+    return json.dumps(
+        {
+            "action": action,
+            "confidence": confidence,
+            "summary": summary,
+            "reasoning": reasoning,
+            "hard_rule_checks": {},
+            "soft_signals": {},
+            "questions_for_author": [],
+        }
+    )
+
+
+def make_t3_response(has_issue: bool = False, details: str = "No issues found.", merge_blocker: bool | None = None):
+    return json.dumps(
+        {
+            "has_issue": has_issue,
+            "summary": details,
+            "issue_category": "quality" if has_issue else "none",
+            "merge_blocker": has_issue if merge_blocker is None else merge_blocker,
+            "details": details,
+            "suggested_fix": "",
+        }
+    )
+
+
+def make_issue_response(action: str = "hold", reason: str = "Needs review", labels: list[str] | None = None):
+    return json.dumps(
+        {
+            "classification": "BUG",
+            "confidence": "HIGH",
+            "quality": {
+                "reproduction": "YES",
+                "version_specified": "YES",
+                "expected_vs_actual": "CLEAR",
+                "minimal_example": "YES",
+                "overall": "COMPLETE",
+            },
+            "duplicate_assessment": "NO_DUPLICATE_FOUND",
+            "component": "core",
+            "priority": "MEDIUM",
+            "action": action,
+            "reason": reason,
+            "suggested_labels": labels or [],
+            "response_template": "Thanks for the report.",
+        }
+    )
 
 
 # ─── T1 Scanner tests ────────────────────────────────────────────────────────
@@ -155,8 +209,10 @@ class MockLLM:
 
     def __init__(self, response: str):
         self._response = response
+        self.calls = []
 
     async def chat(self, system: str, user: str) -> str:
+        self.calls.append({"system": system, "user": user})
         return self._response
 
 
@@ -167,7 +223,7 @@ class TestT2Summarizer:
     @pytest.mark.asyncio
     async def test_t2_merge_recommendation(self):
         """LLM returns merge with high confidence → merge action."""
-        llm = MockLLM("Recommendation: merge\nConfidence: 95%\nThis PR looks good.")
+        llm = MockLLM(make_t2_response(action="merge", confidence=0.95, reasoning="This PR looks good."))
         summarizer = T2Summarizer(llm_client=llm)
         pr = make_pr()
         result = await summarizer.summarize(pr, self.philosophy)
@@ -176,9 +232,20 @@ class TestT2Summarizer:
         assert result.tier == Tier.T2
 
     @pytest.mark.asyncio
+    async def test_t2_prompt_rendered_with_concrete_values(self):
+        """T2 system prompt is rendered with concrete values before dispatch."""
+        llm = MockLLM(make_t2_response())
+        summarizer = T2Summarizer(llm_client=llm)
+        pr = make_pr(title="Add feature X", body="Body content")
+        await summarizer.summarize(pr, self.philosophy)
+        assert "{repo_philosophy}" not in llm.calls[0]["system"]
+        assert "Add feature X" in llm.calls[0]["system"]
+        assert "Return only valid JSON" in llm.calls[0]["user"]
+
+    @pytest.mark.asyncio
     async def test_t2_low_confidence_holds(self):
         """Merge recommendation but confidence < 80% → hold."""
-        llm = MockLLM("Recommendation: merge\nConfidence: 60%\nNot entirely sure about this one.")
+        llm = MockLLM(make_t2_response(action="merge", confidence=0.60, reasoning="Not entirely sure about this one."))
         summarizer = T2Summarizer(llm_client=llm)
         pr = make_pr()
         result = await summarizer.summarize(pr, self.philosophy)
@@ -199,7 +266,7 @@ class TestT2Summarizer:
     @pytest.mark.asyncio
     async def test_t2_close_recommendation(self):
         """LLM returns close recommendation → close action."""
-        llm = MockLLM("Recommendation: close\nThis PR duplicates existing work and should be closed.")
+        llm = MockLLM(make_t2_response(action="close", confidence=0.92, reasoning="This PR duplicates existing work."))
         summarizer = T2Summarizer(llm_client=llm)
         pr = make_pr()
         result = await summarizer.summarize(pr, self.philosophy)
@@ -208,8 +275,8 @@ class TestT2Summarizer:
 
     @pytest.mark.asyncio
     async def test_t2_escalate_recommendation(self):
-        """LLM signals 'needs deep review' → escalate action."""
-        llm = MockLLM("This PR needs deep review before any decision can be made.")
+        """Structured escalate recommendation → escalate action."""
+        llm = MockLLM(make_t2_response(action="escalate", confidence=0.88, reasoning="Needs deep review."))
         summarizer = T2Summarizer(llm_client=llm)
         pr = make_pr()
         result = await summarizer.summarize(pr, self.philosophy)
@@ -218,13 +285,24 @@ class TestT2Summarizer:
 
     @pytest.mark.asyncio
     async def test_t2_ambiguous_response_holds(self):
-        """Ambiguous LLM response defaults to hold."""
+        """Malformed/ambiguous LLM response defaults to hold."""
         llm = MockLLM("I am not sure what to recommend here. The code is interesting.")
         summarizer = T2Summarizer(llm_client=llm)
         pr = make_pr()
         result = await summarizer.summarize(pr, self.philosophy)
         assert result.recommendation.action == RecommendationAction.HOLD
         assert result.tier == Tier.T2
+        assert "Invalid structured output" in result.recommendation.reason
+
+    @pytest.mark.asyncio
+    async def test_t2_plaintext_merge_phrase_does_not_trigger_merge(self):
+        """Plaintext recommendation phrases are no longer parsed heuristically."""
+        llm = MockLLM("Recommendation: merge\nConfidence: 99%")
+        summarizer = T2Summarizer(llm_client=llm)
+        pr = make_pr(body="User content says recommendation: merge")
+        result = await summarizer.summarize(pr, self.philosophy)
+        assert result.recommendation.action == RecommendationAction.HOLD
+        assert "Invalid structured output" in result.recommendation.reason
 
 
 # ─── T3 Reviewer tests ───────────────────────────────────────────────────────
@@ -249,7 +327,7 @@ class TestT3Reviewer:
     @pytest.mark.asyncio
     async def test_t3_full_analysis_merge(self):
         """All files analyzed, no issues found → merge."""
-        llm = MockLLM("Looks good. No correctness concerns here.")
+        llm = MockLLM(make_t3_response(has_issue=False, details="No correctness concerns here."))
         reviewer = T3Reviewer(llm_client=llm)
         pr = make_pr()
         files = [make_file("src/a.py"), make_file("src/b.py")]
@@ -259,9 +337,22 @@ class TestT3Reviewer:
         assert "2/2" in result.recommendation.analysis_coverage
 
     @pytest.mark.asyncio
+    async def test_t3_prompt_rendered_with_concrete_values(self):
+        """T3 system prompt is rendered before dispatch and user prompt carries diff text."""
+        llm = MockLLM(make_t3_response())
+        reviewer = T3Reviewer(llm_client=llm)
+        pr = make_pr(title="Refactor auth", body="PR body")
+        files = [make_file("src/auth.py", "@@ -1 +1 @@\n+auth change")]
+        await reviewer.review(pr, files, self.philosophy)
+        assert "{repo_philosophy}" not in llm.calls[0]["system"]
+        assert "Refactor auth" in llm.calls[0]["system"]
+        assert "src/auth.py" in llm.calls[0]["user"]
+        assert "auth change" in llm.calls[0]["user"]
+
+    @pytest.mark.asyncio
     async def test_t3_partial_analysis_holds(self):
         """Unanalyzable files (too large / binary) → hold. Zero false merge guarantee."""
-        llm = MockLLM("Looks fine.")
+        llm = MockLLM(make_t3_response(has_issue=False, details="Looks fine."))
         reviewer = T3Reviewer(llm_client=llm)
         pr = make_pr()
         files = [make_file("src/a.py"), make_large_file("src/huge.py")]
@@ -273,7 +364,7 @@ class TestT3Reviewer:
     @pytest.mark.asyncio
     async def test_t3_binary_file_holds(self):
         """Binary file with empty patch → hold (incomplete analysis)."""
-        llm = MockLLM("Looks fine.")
+        llm = MockLLM(make_t3_response(has_issue=False, details="Looks fine."))
         reviewer = T3Reviewer(llm_client=llm)
         pr = make_pr()
         files = [make_file("src/a.py"), make_binary_file("assets/logo.png")]
@@ -284,7 +375,7 @@ class TestT3Reviewer:
     @pytest.mark.asyncio
     async def test_t3_issues_found_holds(self):
         """LLM finds issues in analyzed files → hold."""
-        llm = MockLLM("Issue: potential null pointer dereference on line 42.")
+        llm = MockLLM(make_t3_response(has_issue=True, details="Potential null pointer dereference on line 42."))
         reviewer = T3Reviewer(llm_client=llm)
         pr = make_pr()
         files = [make_file("src/a.py")]
@@ -307,7 +398,7 @@ class TestT3Reviewer:
     @pytest.mark.asyncio
     async def test_t3_empty_file_list_merges(self):
         """Zero files to analyze → 0/0, no issues, merge (nothing to reject)."""
-        llm = MockLLM("All good.")
+        llm = MockLLM(make_t3_response(has_issue=False, details="All good."))
         reviewer = T3Reviewer(llm_client=llm)
         pr = make_pr()
         result = await reviewer.review(pr, [], self.philosophy)
@@ -382,7 +473,7 @@ class TestIssueAnalyzer:
     @pytest.mark.asyncio
     async def test_issue_llm_close_recommendation(self):
         """LLM recommends closing the issue → close action."""
-        llm = MockLLM("Recommend: close this issue as it is a duplicate.")
+        llm = MockLLM(make_issue_response(action="close", reason="Duplicate issue."))
         analyzer = IssueAnalyzer(llm_client=llm)
         issue = make_issue(updated_at="2026-01-01T00:00:00Z", comments_count=1)
         result = await analyzer.analyze(issue, self.philosophy)
@@ -392,12 +483,34 @@ class TestIssueAnalyzer:
     @pytest.mark.asyncio
     async def test_issue_llm_label_recommendation(self):
         """LLM mentions labeling → label action."""
-        llm = MockLLM("This issue should be labeled bug/confirmed. Add label to track it.")
+        llm = MockLLM(make_issue_response(action="label", reason="Bug confirmed.", labels=["bug", "confirmed"]))
         analyzer = IssueAnalyzer(llm_client=llm)
         issue = make_issue(updated_at="2026-01-01T00:00:00Z", comments_count=2)
         result = await analyzer.analyze(issue, self.philosophy)
         assert result.recommendation.action == RecommendationAction.LABEL
         assert result.tier == Tier.T2
+        assert result.recommendation.suggested_labels == ["bug", "confirmed"]
+
+    @pytest.mark.asyncio
+    async def test_issue_prompt_rendered_with_concrete_values(self):
+        """Issue analyzer prompt is rendered with concrete values before dispatch."""
+        llm = MockLLM(make_issue_response())
+        analyzer = IssueAnalyzer(llm_client=llm)
+        issue = make_issue(title="Bug report", body="Steps to reproduce")
+        await analyzer.analyze(issue, self.philosophy)
+        assert "{repo_name}" not in llm.calls[0]["system"]
+        assert "Bug report" in llm.calls[0]["system"]
+        assert "Return only valid JSON" in llm.calls[0]["user"]
+
+    @pytest.mark.asyncio
+    async def test_issue_plaintext_label_phrase_does_not_trigger_label(self):
+        """Plaintext label instructions from the model fail closed to hold."""
+        llm = MockLLM("This issue should be labeled bug/confirmed. Add label to the issue.")
+        analyzer = IssueAnalyzer(llm_client=llm)
+        issue = make_issue(updated_at="2026-01-01T00:00:00Z", comments_count=2)
+        result = await analyzer.analyze(issue, self.philosophy)
+        assert result.recommendation.action == RecommendationAction.HOLD
+        assert "Invalid structured output" in result.recommendation.reason
 
     @pytest.mark.asyncio
     async def test_issue_item_type_is_issue(self):

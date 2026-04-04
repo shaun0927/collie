@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collie.core.models import (
     EscalationRule,
+    GitHubItemMetadata,
     HardRule,
     ItemType,
     Mode,
@@ -147,3 +148,45 @@ def test_recommendation_dataclass():
     assert r.title == "Add dark mode"
     assert r.suggested_labels == []
     assert r.linked_pr is None
+
+
+def test_github_item_metadata_roundtrip():
+    metadata = GitHubItemMetadata(
+        author_association="MEMBER",
+        is_draft=True,
+        review_decision="APPROVED",
+        mergeable="MERGEABLE",
+        auto_merge_enabled=True,
+        required_check_state="SUCCESS",
+        base_ref_name="main",
+        head_ref_name="feature/x",
+        head_sha="abc123",
+        linked_issue_numbers=[10, 11],
+        repository_owner="octo",
+        repository_name="repo",
+    )
+    restored = GitHubItemMetadata.from_dict(metadata.to_dict())
+    assert restored == metadata
+
+
+def test_github_item_metadata_from_github_item():
+    item = {
+        "authorAssociation": "CONTRIBUTOR",
+        "isDraft": False,
+        "reviewDecision": "REVIEW_REQUIRED",
+        "mergeable": "CONFLICTING",
+        "autoMergeRequest": {"enabledAt": "2026-01-01T00:00:00Z"},
+        "baseRefName": "main",
+        "headRefName": "feature/y",
+        "closingIssuesReferences": {"nodes": [{"number": 42, "title": "Bug"}]},
+        "commits": {"nodes": [{"commit": {"oid": "deadbeef", "statusCheckRollup": {"state": "FAILURE"}}}]},
+        "repository": {"name": "repo", "owner": {"login": "octo"}},
+    }
+    metadata = GitHubItemMetadata.from_github_item(item)
+    assert metadata.author_association == "CONTRIBUTOR"
+    assert metadata.review_decision == "REVIEW_REQUIRED"
+    assert metadata.mergeable == "CONFLICTING"
+    assert metadata.auto_merge_enabled is True
+    assert metadata.linked_issue_numbers == [42]
+    assert metadata.required_check_state == "FAILURE"
+    assert metadata.repository_owner == "octo"

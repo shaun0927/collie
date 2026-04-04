@@ -32,6 +32,10 @@ def _b64(text: str) -> str:
     return base64.b64encode(text.encode()).decode()
 
 
+async def _async_return(value):
+    return value
+
+
 # ---------------------------------------------------------------------------
 # RepoAnalyzer
 # ---------------------------------------------------------------------------
@@ -306,6 +310,7 @@ def test_generate_for_mcp_profile_fields():
     assert p["has_codeowners"] is True
     assert p["ci_detected"] is True
     assert p["label_count"] == 2
+    assert p["default_branch"] == "main"
 
 
 def test_generate_for_mcp_interview_guide_completeness():
@@ -428,6 +433,110 @@ def test_philosophy_mode_is_training():
     assert philosophy.mode == Mode.TRAINING
 
 
+@pytest.mark.asyncio
+async def test_repo_analyzer_enriches_profile_with_labels_and_repo_metadata():
+    """Analyzer collects richer repo metadata beyond presence checks."""
+
+    class FakeREST:
+        async def get_repository(self, owner, repo):
+            return {"default_branch": "develop", "description": "Example repo"}
+
+        async def get_repo_content(self, owner, repo, path):
+            return {
+                "CONTRIBUTING.md": "# Contributing",
+                ".github/PULL_REQUEST_TEMPLATE.md": "## Summary\n## Test plan",
+                ".github/workflows": "ci.yml, release.yml",
+                ".github/ISSUE_TEMPLATE": "bug.yml, feature.yml",
+                "docs": "guide.md, api.md",
+                "tests": "test_cli.py",
+                "pyproject.toml": "[tool.ruff]\n[tool.black]",
+                "SECURITY.md": "Contact security@example.com",
+            }.get(path)
+
+        async def get_branch_protection(self, owner, repo, branch="main"):
+            return {}
+
+        async def list_labels(self, owner, repo, limit=100):
+            return ["bug", "good first issue", "release", "security", "stale"]
+
+        async def list_recent_merged_pulls(self, owner, repo, limit=5):
+            return [
+                {
+                    "number": 1,
+                    "title": "feat: add thing",
+                    "author": "alice",
+                    "additions": 20,
+                    "deletions": 5,
+                    "changed_files": 3,
+                    "approval_count": 2,
+                },
+                {
+                    "number": 2,
+                    "title": "fix: tighten auth",
+                    "author": "bob",
+                    "additions": 10,
+                    "deletions": 2,
+                    "changed_files": 1,
+                    "approval_count": 1,
+                },
+            ]
+
+    analyzer = RepoAnalyzer(FakeREST())
+    profile = await analyzer.analyze("owner", "repo")
+
+    assert profile.default_branch == "develop"
+    assert profile.repo_description == "Example repo"
+    assert profile.labels[:2] == ["bug", "good first issue"]
+    assert profile.issue_templates == ["bug.yml", "feature.yml"]
+    assert profile.docs_paths == ["docs"]
+    assert profile.test_paths == ["tests"]
+    assert profile.lint_tools == ["black", "ruff"]
+    assert profile.release_labels == ["release"]
+    assert profile.stale_labels == ["stale"]
+    assert profile.pr_template_fields == ["Summary", "Test plan"]
+    assert profile.org_members == ["alice", "bob"]
+
+
+def test_get_template_vars_uses_richer_profile_signals():
+    """Template vars are grounded in the richer RepoProfile fields."""
+    profile = RepoProfile(
+        owner="o",
+        repo="r",
+        labels=["bug", "release"],
+        ci_workflows=["ci.yml"],
+        has_codeowners=True,
+        ownership_file=".github/CODEOWNERS",
+        default_branch="develop",
+        docs_paths=["docs"],
+        test_paths=["tests"],
+        lint_tools=["ruff", "black"],
+        release_labels=["release"],
+        pr_template_fields=["Summary", "Test plan"],
+        security_areas=["SECURITY.md", "security"],
+        perf_tools=["benchmarks"],
+        org_members=["alice", "bob"],
+        recent_merges=[
+            {"title": "feat: add thing", "additions": 20, "deletions": 5, "changed_files": 3, "approval_count": 2},
+            {"title": "fix: auth tweak", "additions": 10, "deletions": 2, "changed_files": 1, "approval_count": 1},
+        ],
+    )
+    interviewer = SitInterviewer(profile)
+    vars = interviewer._get_template_vars()
+
+    assert vars["review_count"] == 2
+    assert vars["linters"] == "ruff, black"
+    assert vars["test_path"] == "tests"
+    assert vars["default_branch"] == "develop"
+    assert vars["template_fields"] == "Summary, Test plan"
+    assert vars["min_lines"] == 12
+    assert vars["max_lines"] == 25
+    assert vars["max_files"] == 3
+    assert vars["release_labels"] == "release"
+    assert vars["org_members"] == 2
+    assert vars["security_areas"] == "SECURITY.md, security"
+    assert "Conventional Commits" in vars["convention_hint"]
+
+
 def test_soft_answers_go_to_soft_text():
     """Non-hard-rule, non-escalation answers appear in soft_parts."""
     from collie.core.question_bank import QUESTION_BANK
@@ -470,3 +579,8 @@ def test_repo_profile_defaults():
     assert profile.ci_workflows == []
     assert profile.recent_merges == []
     assert profile.has_codeowners is False
+    assert profile.default_branch == "main"
+    assert profile.docs_paths == []
+    assert profile.test_paths == []
+    assert profile.lint_tools == []
+    assert profile.issue_templates == []

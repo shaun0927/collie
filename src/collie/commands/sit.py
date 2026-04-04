@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from collie.core.models import EscalationRule, HardRule, Mode, Philosophy, TuningParams
@@ -23,6 +24,22 @@ class RepoProfile:
     ci_workflows: list[str] = field(default_factory=list)
     recent_merges: list[dict] = field(default_factory=list)
     has_codeowners: bool = False
+    ownership_file: str = ""
+    default_branch: str = "main"
+    repo_description: str = ""
+    issue_templates: list[str] = field(default_factory=list)
+    discussion_templates: list[str] = field(default_factory=list)
+    docs_paths: list[str] = field(default_factory=list)
+    test_paths: list[str] = field(default_factory=list)
+    lint_tools: list[str] = field(default_factory=list)
+    perf_tools: list[str] = field(default_factory=list)
+    release_labels: list[str] = field(default_factory=list)
+    stale_labels: list[str] = field(default_factory=list)
+    security_policy_paths: list[str] = field(default_factory=list)
+    pr_template_fields: list[str] = field(default_factory=list)
+    convention_hint: str = "unknown"
+    security_areas: list[str] = field(default_factory=list)
+    org_members: list[str] = field(default_factory=list)
 
 
 class RepoAnalyzer:
@@ -34,6 +51,11 @@ class RepoAnalyzer:
     async def analyze(self, owner: str, repo: str) -> RepoProfile:
         """Scan repo for CONTRIBUTING.md, PR templates, branch protection, labels, CI config."""
         profile = RepoProfile(owner=owner, repo=repo)
+
+        repo_meta = await self.rest.get_repository(owner, repo)
+        if repo_meta:
+            profile.default_branch = repo_meta.get("default_branch", "main")
+            profile.repo_description = repo_meta.get("description", "") or ""
 
         # Fetch CONTRIBUTING.md
         content = await self.rest.get_repo_content(owner, repo, "CONTRIBUTING.md")
@@ -51,29 +73,137 @@ class RepoAnalyzer:
             if content:
                 profile.has_pr_template = True
                 profile.pr_template_content = content
+                profile.pr_template_fields = self._extract_template_fields(content)
                 break
 
         # Branch protection
-        protection = await self.rest.get_branch_protection(owner, repo, "main")
+        protection = await self.rest.get_branch_protection(owner, repo, profile.default_branch)
         if protection is None:
             protection = await self.rest.get_branch_protection(owner, repo, "master")
         if protection:
             profile.branch_protection = protection
 
         # CI workflows - check .github/workflows/
-        # (simplified: just check if directory exists)
         ci_content = await self.rest.get_repo_content(owner, repo, ".github/workflows")
         if ci_content:
-            profile.ci_workflows = ["detected"]
+            profile.ci_workflows = self._split_directory_listing(ci_content)
 
         # CODEOWNERS
         for path in ["CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"]:
             content = await self.rest.get_repo_content(owner, repo, path)
             if content:
                 profile.has_codeowners = True
+                profile.ownership_file = path
                 break
 
+        profile.labels = await self.rest.list_labels(owner, repo)
+        profile.release_labels = [
+            label for label in profile.labels if any(token in label.lower() for token in ["release", "backport"])
+        ]
+        profile.stale_labels = [label for label in profile.labels if "stale" in label.lower()]
+        profile.recent_merges = await self.rest.list_recent_merged_pulls(owner, repo, limit=5)
+        profile.org_members = sorted(
+            {merge.get("author", "") for merge in profile.recent_merges if merge.get("author")}
+        )
+        profile.convention_hint = self._infer_convention_hint(profile.recent_merges)
+
+        issue_templates = await self.rest.get_repo_content(owner, repo, ".github/ISSUE_TEMPLATE")
+        if issue_templates:
+            profile.issue_templates = self._split_directory_listing(issue_templates)
+
+        discussion_templates = await self.rest.get_repo_content(owner, repo, ".github/DISCUSSION_TEMPLATE")
+        if discussion_templates:
+            profile.discussion_templates = self._split_directory_listing(discussion_templates)
+
+        for docs_path in ["docs", "README.md"]:
+            content = await self.rest.get_repo_content(owner, repo, docs_path)
+            if content:
+                profile.docs_paths.append(docs_path)
+
+        for test_path in ["tests", "test", "__tests__"]:
+            content = await self.rest.get_repo_content(owner, repo, test_path)
+            if content:
+                profile.test_paths.append(test_path)
+
+        detected_lint_tools = []
+        lint_candidates = {
+            "ruff": ["ruff.toml", ".ruff.toml", "pyproject.toml"],
+            "eslint": [".eslintrc", ".eslintrc.json", "package.json"],
+            "black": ["pyproject.toml"],
+            "prettier": [".prettierrc", "package.json"],
+        }
+        for tool, candidates in lint_candidates.items():
+            for candidate in candidates:
+                content = await self.rest.get_repo_content(owner, repo, candidate)
+                if content and self._content_suggests_tool(tool, candidate, content):
+                    detected_lint_tools.append(tool)
+                    break
+        profile.lint_tools = sorted(set(detected_lint_tools))
+
+        for perf_path in ["benchmarks", "benchmark", "perf", "performance"]:
+            content = await self.rest.get_repo_content(owner, repo, perf_path)
+            if content:
+                profile.perf_tools.append(perf_path)
+
+        security_markers = []
+        for security_path in ["SECURITY.md", ".github/SECURITY.md"]:
+            content = await self.rest.get_repo_content(owner, repo, security_path)
+            if content:
+                profile.security_policy_paths.append(security_path)
+                security_markers.append(security_path)
+
+        profile.security_areas = sorted(
+            set(
+                security_markers
+                + [
+                    label
+                    for label in profile.labels
+                    if any(token in label.lower() for token in ["security", "auth", "permission"])
+                ]
+            )
+        )
+
         return profile
+
+    @staticmethod
+    def _split_directory_listing(content: str) -> list[str]:
+        return [entry.strip() for entry in content.split(",") if entry.strip()]
+
+    @staticmethod
+    def _extract_template_fields(content: str) -> list[str]:
+        fields = []
+        for line in content.splitlines():
+            stripped = line.strip()
+            heading = re.match(r"^#+\s+(.+)$", stripped)
+            if heading:
+                fields.append(heading.group(1).strip())
+                continue
+            checkbox = re.match(r"^- \[[ xX]\]\s+(.+)$", stripped)
+            if checkbox:
+                fields.append(checkbox.group(1).strip())
+        return fields[:10]
+
+    @staticmethod
+    def _infer_convention_hint(recent_merges: list[dict]) -> str:
+        titles = [merge.get("title", "") for merge in recent_merges if merge.get("title")]
+        if any(re.match(r"^(feat|fix|chore|docs|refactor)(\(.+\))?:", title, re.IGNORECASE) for title in titles):
+            return "Conventional Commits-like titles detected"
+        if any(re.match(r"^(Fixed|Refs)\s+#\d+\s+--", title) for title in titles):
+            return "Django-style ticket title convention detected"
+        return "unknown"
+
+    @staticmethod
+    def _content_suggests_tool(tool: str, candidate: str, content: str) -> bool:
+        lowered = content.lower()
+        if tool == "ruff":
+            return "ruff" in candidate.lower() or "[tool.ruff]" in lowered
+        if tool == "eslint":
+            return "eslint" in lowered or "eslint" in candidate.lower()
+        if tool == "black":
+            return "[tool.black]" in lowered or "black" in lowered
+        if tool == "prettier":
+            return "prettier" in lowered or "prettier" in candidate.lower()
+        return False
 
 
 class SitInterviewer:
@@ -201,29 +331,41 @@ class SitInterviewer:
 
     def _get_template_vars(self) -> dict:
         """Generate template variables from profile."""
+        merge_sizes = [merge.get("additions", 0) + merge.get("deletions", 0) for merge in self.profile.recent_merges]
+        merge_files = [merge.get("changed_files", 0) for merge in self.profile.recent_merges]
+        approval_counts = [merge.get("approval_count", 0) for merge in self.profile.recent_merges]
+        review_count = approval_counts[0] if approval_counts else "unknown"
+        min_lines = min(merge_sizes) if merge_sizes else "unknown"
+        max_lines = max(merge_sizes) if merge_sizes else "unknown"
+        max_files = max(merge_files) if merge_files else "unknown"
+
         return {
             "ci_tools": ", ".join(self.profile.ci_workflows) or "unknown",
             "labels": ", ".join(self.profile.labels[:10]) or "none found",
             "existing_labels": ", ".join(self.profile.labels[:10]) or "none found",
-            "review_count": "unknown",
-            "gfi_count": "unknown",
-            "ownership_file": "CODEOWNERS" if self.profile.has_codeowners else "none",
-            "release_labels": "unknown",
+            "review_count": review_count,
+            "gfi_count": sum(1 for label in self.profile.labels if "good first issue" in label.lower()),
+            "ownership_file": self.profile.ownership_file or ("CODEOWNERS" if self.profile.has_codeowners else "none"),
+            "release_labels": ", ".join(self.profile.release_labels) or "unknown",
             "latest_version": "unknown",
-            "stale_days": "90",
-            "avg_merge_size": "unknown",
-            "linters": "unknown",
-            "test_path": "unknown",
-            "default_branch": "main",
-            "template_fields": "unknown",
-            "min_lines": "unknown",
-            "max_lines": "unknown",
-            "org_members": "unknown",
-            "docs_path": "docs/",
-            "convention_hint": "unknown",
-            "security_areas": "unknown",
-            "max_files": "unknown",
-            "perf_tools": "unknown",
+            "stale_days": "90" if self.profile.stale_labels else "unknown",
+            "avg_merge_size": round(sum(merge_sizes) / len(merge_sizes)) if merge_sizes else "unknown",
+            "linters": ", ".join(self.profile.lint_tools) or "unknown",
+            "test_path": self.profile.test_paths[0] if self.profile.test_paths else "unknown",
+            "default_branch": self.profile.default_branch,
+            "template_fields": ", ".join(self.profile.pr_template_fields) or "unknown",
+            "min_lines": min_lines,
+            "max_lines": max_lines,
+            "org_members": len(self.profile.org_members) or "unknown",
+            "docs_path": self.profile.docs_paths[0] if self.profile.docs_paths else "docs/",
+            "convention_hint": (
+                self.profile.convention_hint
+                if self.profile.convention_hint != "unknown"
+                else RepoAnalyzer._infer_convention_hint(self.profile.recent_merges)
+            ),
+            "security_areas": ", ".join(self.profile.security_areas) or "unknown",
+            "max_files": max_files,
+            "perf_tools": ", ".join(self.profile.perf_tools) or "unknown",
         }
 
     def generate_for_mcp(self) -> dict:
@@ -246,6 +388,13 @@ class SitInterviewer:
                 "has_codeowners": self.profile.has_codeowners,
                 "ci_detected": bool(self.profile.ci_workflows),
                 "label_count": len(self.profile.labels),
+                "default_branch": self.profile.default_branch,
+                "repo_description": self.profile.repo_description,
+                "docs_paths": list(self.profile.docs_paths),
+                "test_paths": list(self.profile.test_paths),
+                "lint_tools": list(self.profile.lint_tools),
+                "issue_template_count": len(self.profile.issue_templates),
+                "recent_merge_count": len(self.profile.recent_merges),
             },
             "interview_guide": questions,
             "instructions": (

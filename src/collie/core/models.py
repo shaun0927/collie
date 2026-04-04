@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,6 +37,94 @@ class RecommendationStatus(str, Enum):
     EXECUTED = "executed"
     FAILED = "failed"
     EXPIRED = "expired"
+
+
+@dataclass
+class GitHubItemMetadata:
+    pull_request_id: str = ""
+    author_association: str = "UNKNOWN"
+    is_draft: bool = False
+    review_decision: str = "UNKNOWN"
+    mergeable: str = "UNKNOWN"
+    auto_merge_enabled: bool = False
+    merge_queue_required: bool = False
+    required_check_state: str = "UNKNOWN"
+    base_ref_name: str = ""
+    head_ref_name: str = ""
+    head_sha: str = ""
+    linked_issue_numbers: list[int] = field(default_factory=list)
+    repository_owner: str = ""
+    repository_name: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "pull_request_id": self.pull_request_id,
+            "author_association": self.author_association,
+            "is_draft": self.is_draft,
+            "review_decision": self.review_decision,
+            "mergeable": self.mergeable,
+            "auto_merge_enabled": self.auto_merge_enabled,
+            "merge_queue_required": self.merge_queue_required,
+            "required_check_state": self.required_check_state,
+            "base_ref_name": self.base_ref_name,
+            "head_ref_name": self.head_ref_name,
+            "head_sha": self.head_sha,
+            "linked_issue_numbers": list(self.linked_issue_numbers),
+            "repository_owner": self.repository_owner,
+            "repository_name": self.repository_name,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "GitHubItemMetadata":
+        return cls(
+            pull_request_id=str(data.get("pull_request_id", "")),
+            author_association=str(data.get("author_association", "UNKNOWN")),
+            is_draft=bool(data.get("is_draft", False)),
+            review_decision=str(data.get("review_decision", "UNKNOWN")),
+            mergeable=str(data.get("mergeable", "UNKNOWN")),
+            auto_merge_enabled=bool(data.get("auto_merge_enabled", False)),
+            merge_queue_required=bool(data.get("merge_queue_required", False)),
+            required_check_state=str(data.get("required_check_state", "UNKNOWN")),
+            base_ref_name=str(data.get("base_ref_name", "")),
+            head_ref_name=str(data.get("head_ref_name", "")),
+            head_sha=str(data.get("head_sha", "")),
+            linked_issue_numbers=[int(num) for num in data.get("linked_issue_numbers", [])],
+            repository_owner=str(data.get("repository_owner", "")),
+            repository_name=str(data.get("repository_name", "")),
+        )
+
+    @classmethod
+    def from_github_item(cls, item: dict) -> "GitHubItemMetadata":
+        linked = item.get("closingIssuesReferences", {}).get("nodes", [])
+        commits = item.get("commits", {}).get("nodes", [])
+        head_sha = ""
+        required_check_state = "UNKNOWN"
+        if commits:
+            commit = commits[0].get("commit", {})
+            head_sha = commit.get("oid", "")
+            rollup = commit.get("statusCheckRollup") or {}
+            required_check_state = rollup.get("state", "UNKNOWN")
+
+        auto_merge = item.get("autoMergeRequest")
+        repository = item.get("repository", {})
+        owner = repository.get("owner", {}).get("login", "")
+
+        return cls(
+            pull_request_id=str(item.get("id", "")),
+            author_association=str(item.get("authorAssociation", "UNKNOWN")),
+            is_draft=bool(item.get("isDraft", False)),
+            review_decision=str(item.get("reviewDecision", "UNKNOWN")),
+            mergeable=str(item.get("mergeable", "UNKNOWN")),
+            auto_merge_enabled=auto_merge is not None,
+            merge_queue_required=bool(item.get("mergeQueueRequired", False)),
+            required_check_state=required_check_state,
+            base_ref_name=str(item.get("baseRefName", "")),
+            head_ref_name=str(item.get("headRefName", "")),
+            head_sha=head_sha,
+            linked_issue_numbers=[int(node["number"]) for node in linked if node.get("number") is not None],
+            repository_owner=str(owner),
+            repository_name=str(repository.get("name", "")),
+        )
 
 
 @dataclass
@@ -299,3 +389,85 @@ class Recommendation:
     created_at: str = ""
     executed_at: str = ""
     failure_reason: str = ""
+    execution_path: str = ""
+    github_metadata: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "number": self.number,
+            "item_type": self.item_type.value,
+            "action": self.action.value,
+            "reason": self.reason,
+            "status": self.status.value,
+            "title": self.title,
+            "analysis_coverage": self.analysis_coverage,
+            "suggested_comment": self.suggested_comment,
+            "suggested_labels": list(self.suggested_labels),
+            "linked_pr": self.linked_pr,
+            "created_at": self.created_at,
+            "executed_at": self.executed_at,
+            "failure_reason": self.failure_reason,
+            "execution_path": self.execution_path,
+            "github_metadata": self.github_metadata,
+        }
+
+    def payload_hash(self) -> str:
+        payload = self.to_dict()
+        payload.pop("status", None)
+        payload.pop("created_at", None)
+        payload.pop("executed_at", None)
+        payload.pop("failure_reason", None)
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Recommendation":
+        item_type_raw = data.get("item_type", ItemType.PR.value)
+        action_raw = data.get("action", RecommendationAction.HOLD.value)
+        status_raw = data.get("status", RecommendationStatus.PENDING.value)
+
+        return cls(
+            number=int(data["number"]),
+            item_type=ItemType(item_type_raw),
+            action=RecommendationAction(action_raw),
+            reason=str(data.get("reason", "")),
+            status=RecommendationStatus(status_raw),
+            title=str(data.get("title", "")),
+            analysis_coverage=str(data.get("analysis_coverage", "")),
+            suggested_comment=str(data.get("suggested_comment", "")),
+            suggested_labels=list(data.get("suggested_labels", [])),
+            linked_pr=data.get("linked_pr"),
+            created_at=str(data.get("created_at", "")),
+            executed_at=str(data.get("executed_at", "")),
+            failure_reason=str(data.get("failure_reason", "")),
+            execution_path=str(data.get("execution_path", "")),
+            github_metadata=dict(data.get("github_metadata", {})),
+        )
+
+
+@dataclass
+class ApprovalRecord:
+    number: int
+    approver: str
+    approved_payload_hash: str
+    approved_at: str
+    source: str = "cli"
+
+    def to_dict(self) -> dict:
+        return {
+            "number": self.number,
+            "approver": self.approver,
+            "approved_payload_hash": self.approved_payload_hash,
+            "approved_at": self.approved_at,
+            "source": self.source,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ApprovalRecord":
+        return cls(
+            number=int(data["number"]),
+            approver=str(data["approver"]),
+            approved_payload_hash=str(data["approved_payload_hash"]),
+            approved_at=str(data["approved_at"]),
+            source=str(data.get("source", "cli")),
+        )

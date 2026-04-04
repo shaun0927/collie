@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from collie.core.cost_tracker import CostTracker
 from collie.core.incremental import IncrementalManager
 from collie.core.models import (
+    GitHubItemMetadata,
     ItemType,
     Philosophy,
     Recommendation,
@@ -25,6 +26,7 @@ class BarkReport:
     cost_summary: str = ""
     full_scan: bool = False
     approved_executed: list[int] = field(default_factory=list)
+    metadata_summary: str = ""
 
     def summary(self) -> str:
         from collections import Counter
@@ -39,6 +41,8 @@ class BarkReport:
         ]
         if self.approved_executed:
             lines.append(f"  Executed: {len(self.approved_executed)} approved items")
+        if self.metadata_summary:
+            lines.append(f"  Metadata: {self.metadata_summary}")
         return "\n".join(lines)
 
 
@@ -55,6 +59,7 @@ class BarkPipeline:
 
     async def run(self, owner: str, repo: str, cost_cap: float = 50.0, progress_callback=None) -> BarkReport:
         """Execute full bark pipeline."""
+        from collie.commands.sit import RepoAnalyzer
         from collie.core.analyzer import IssueAnalyzer, T1Scanner, T2Summarizer, T3Reviewer
 
         async def _notify(msg: str):
@@ -73,6 +78,8 @@ class BarkPipeline:
         if philosophy is None:
             raise ValueError("No philosophy found. Run 'collie sit' first.")
 
+        repo_profile = await self._load_repo_profile(owner, repo, RepoAnalyzer)
+
         # Determine scan mode
         full_scan = await self.incremental.should_full_scan(owner, repo)
 
@@ -81,11 +88,14 @@ class BarkPipeline:
         else:
             items = await self.incremental.get_delta(owner, repo)
 
+        await self.incremental.apply_stale_queue_updates(owner, repo, items)
+
         # Separate PRs and Issues
-        prs = [i for i in items if "additions" in i]
-        issues = [i for i in items if "additions" not in i]
+        prs = [self._attach_profile_context(i, repo_profile, owner, repo) for i in items if "additions" in i]
+        issues = [self._attach_profile_context(i, repo_profile, owner, repo) for i in items if "additions" not in i]
         total = len(items)
         await _notify(f"Found {total} items to analyze ({len(prs)} PRs, {len(issues)} issues)")
+        metadata_summary = self._summarize_metadata(prs)
 
         recommendations: list[Recommendation] = []
 
@@ -114,6 +124,7 @@ class BarkPipeline:
         # Record bark time and philosophy hash
         self.incremental.record_bark_time()
         self.incremental.record_philosophy_hash(philosophy)
+        await self.incremental.persist_state(owner, repo, philosophy, items)
 
         return BarkReport(
             total_items=len(items),
@@ -123,6 +134,7 @@ class BarkPipeline:
             cost_summary=cost.summary(),
             full_scan=full_scan,
             approved_executed=executed,
+            metadata_summary=metadata_summary,
         )
 
     async def _analyze_pr(self, item, philosophy, t1, t2, t3, cost) -> Recommendation:
@@ -163,6 +175,7 @@ class BarkPipeline:
             action=RecommendationAction.HOLD,
             reason="Deferred: deeper review needed but not performed (cost/depth limit)",
             title=item.get("title", ""),
+            github_metadata=dict(item.get("github_metadata", {})),
         )
 
     async def _analyze_issue(self, issue, philosophy, analyzer, cost, prs) -> Recommendation:
@@ -179,6 +192,7 @@ class BarkPipeline:
             action=RecommendationAction.HOLD,
             reason="Deferred: analysis skipped (cost limit)",
             title=issue.get("title", ""),
+            github_metadata=dict(issue.get("github_metadata", {})),
         )
 
     def _needs_t3(self, item: dict, philosophy: Philosophy) -> bool:
@@ -189,3 +203,75 @@ class BarkPipeline:
                 if pattern in item.get("title", "").lower():
                     return True
         return False
+
+    async def _load_repo_profile(self, owner: str, repo: str, analyzer_cls):
+        """Best-effort repo profile for richer bark prompt context."""
+        if not hasattr(self.rest, "get_repo_content"):
+            return None
+        try:
+            analyzer = analyzer_cls(self.rest)
+            return await analyzer.analyze(owner, repo)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _attach_profile_context(item: dict, profile, owner: str, repo: str) -> dict:
+        """Attach repo profile signals to an item without mutating the original object."""
+        if profile is None:
+            enriched = dict(item)
+            metadata = GitHubItemMetadata.from_github_item(enriched)
+            enriched["github_metadata"] = metadata.to_dict()
+            enriched["linkedIssues"] = [f"#{num}" for num in metadata.linked_issue_numbers]
+            enriched.setdefault(
+                "repository",
+                {"name": metadata.repository_name, "owner": {"login": metadata.repository_owner}},
+            )
+            return enriched
+
+        enriched = dict(item)
+        metadata = GitHubItemMetadata.from_github_item(enriched)
+        enriched["github_metadata"] = metadata.to_dict()
+        enriched.setdefault("repositoryName", f"{owner}/{repo}")
+        enriched.setdefault("repositoryDescription", getattr(profile, "repo_description", ""))
+        enriched.setdefault("knownComponents", ", ".join(getattr(profile, "labels", [])[:10]) or "unknown")
+        enriched.setdefault("authorHistory", metadata.author_association)
+        enriched.setdefault("languages", "unknown")
+        enriched.setdefault("frameworks", "unknown")
+        enriched.setdefault("testFramework", ", ".join(getattr(profile, "test_paths", [])) or "unknown")
+        enriched.setdefault("styleTools", ", ".join(getattr(profile, "lint_tools", [])) or "unknown")
+        enriched.setdefault("sensitiveAreas", ", ".join(getattr(profile, "security_areas", [])) or "unknown")
+        enriched.setdefault("linkedIssues", [f"#{num}" for num in metadata.linked_issue_numbers])
+        enriched.setdefault("filesChangedList", ", ".join(getattr(profile, "docs_paths", [])[:5]) or "Not available.")
+        enriched.setdefault("diffSummary", "Not available.")
+        enriched.setdefault(
+            "repository",
+            {"name": metadata.repository_name or repo, "owner": {"login": metadata.repository_owner or owner}},
+        )
+        return enriched
+
+    @staticmethod
+    def _summarize_metadata(prs: list[dict]) -> str:
+        """Summarize a subset of GitHub-native review/merge metadata for debug/status output."""
+        if not prs:
+            return ""
+
+        drafts = 0
+        review_decisions: dict[str, int] = {}
+        mergeable_counts: dict[str, int] = {}
+        author_assoc: dict[str, int] = {}
+
+        for pr in prs:
+            metadata = pr.get("github_metadata", {})
+            if metadata.get("is_draft"):
+                drafts += 1
+            review_decision = metadata.get("review_decision", "UNKNOWN")
+            mergeable = metadata.get("mergeable", "UNKNOWN")
+            association = metadata.get("author_association", "UNKNOWN")
+            review_decisions[review_decision] = review_decisions.get(review_decision, 0) + 1
+            mergeable_counts[mergeable] = mergeable_counts.get(mergeable, 0) + 1
+            author_assoc[association] = author_assoc.get(association, 0) + 1
+
+        return (
+            f"drafts={drafts}; reviewDecision={review_decisions}; "
+            f"mergeable={mergeable_counts}; authorAssociation={author_assoc}"
+        )

@@ -1,5 +1,7 @@
 """GitHub GraphQL client for bulk fetching issues, PRs, and discussions."""
 
+from datetime import datetime
+
 import httpx
 
 ISSUES_AND_PRS_QUERY = """
@@ -8,7 +10,7 @@ query($owner: String!, $repo: String!, $afterIssues: String, $afterPRs: String) 
     issues(first: 100, after: $afterIssues, states: OPEN, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number title state author { login }
+        number title body state author { login } authorAssociation
         labels(first: 10) { nodes { name } }
         createdAt updatedAt closedAt
         comments { totalCount }
@@ -17,11 +19,18 @@ query($owner: String!, $repo: String!, $afterIssues: String, $afterPRs: String) 
     pullRequests(first: 100, after: $afterPRs, states: OPEN, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number title state author { login }
+        id number title body state author { login } authorAssociation
         labels(first: 10) { nodes { name } }
+        isDraft
+        reviewDecision
+        mergeable
         additions deletions changedFiles
+        baseRefName headRefName
+        autoMergeRequest { enabledAt }
+        closingIssuesReferences(first: 10) { nodes { number title } }
         reviews(first: 10) { nodes { state author { login } } }
-        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+        commits(last: 1) { nodes { commit { oid statusCheckRollup { state } } } }
+        repository { name owner { login } }
         createdAt updatedAt closedAt mergedAt
       }
     }
@@ -33,12 +42,18 @@ PR_DETAIL_QUERY = """
 query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
-      number title state body author { login }
+      id number title state body author { login } authorAssociation
       labels(first: 10) { nodes { name } }
+      isDraft
+      reviewDecision
+      mergeable
       additions deletions changedFiles
       baseRefName headRefName
+      autoMergeRequest { enabledAt }
+      closingIssuesReferences(first: 10) { nodes { number title } }
       reviews(first: 20) { nodes { state author { login } submittedAt body } }
-      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      commits(last: 1) { nodes { commit { oid statusCheckRollup { state } } } }
+      repository { name owner { login } }
       createdAt updatedAt closedAt mergedAt
     }
   }
@@ -148,6 +163,11 @@ class GitHubGraphQL:
             has_next_prs = prs_page["pageInfo"]["hasNextPage"]
             after_prs = prs_page["pageInfo"]["endCursor"] if has_next_prs else after_prs
 
+        if since:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            issues = [item for item in issues if _item_updated_after(item, since_dt)]
+            pull_requests = [item for item in pull_requests if _item_updated_after(item, since_dt)]
+
         return {"issues": issues, "pull_requests": pull_requests}
 
     async def fetch_pr_detail(self, owner: str, repo: str, number: int) -> dict:
@@ -254,5 +274,31 @@ class GitHubGraphQL:
         data = await self._execute(query, {"owner": owner, "repo": repo})
         return data["repository"]["id"]
 
+    async def get_viewer_repository_permission(self, owner: str, repo: str) -> tuple[str, str]:
+        """Return viewer login and repository permission for the current token."""
+        query = """
+        query($owner: String!, $repo: String!) {
+          viewer { login }
+          repository(owner: $owner, name: $repo) { viewerPermission }
+        }
+        """
+        data = await self._execute(query, {"owner": owner, "repo": repo})
+        viewer = data["viewer"]["login"]
+        permission = data["repository"].get("viewerPermission") or "NONE"
+        return viewer, permission
+
     async def close(self):
         await self.client.aclose()
+
+
+def _item_updated_after(item: dict, since_dt: datetime) -> bool:
+    """Return whether the item was updated after the given watermark."""
+    updated_at = item.get("updatedAt") or item.get("createdAt")
+    if not updated_at:
+        return True
+
+    try:
+        item_dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return item_dt > since_dt

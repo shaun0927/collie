@@ -61,8 +61,23 @@ def _issues_prs_page(
 
 @pytest.mark.asyncio
 async def test_fetch_issues_and_prs_single_page():
-    issue = {"number": 1, "title": "Bug", "state": "OPEN"}
-    pr = {"number": 2, "title": "Fix", "state": "OPEN"}
+    issue = {"number": 1, "title": "Bug", "body": "Issue body", "authorAssociation": "NONE", "state": "OPEN"}
+    pr = {
+        "number": 2,
+        "title": "Fix",
+        "body": "Fixes #1",
+        "authorAssociation": "MEMBER",
+        "isDraft": False,
+        "reviewDecision": "APPROVED",
+        "mergeable": "MERGEABLE",
+        "baseRefName": "main",
+        "headRefName": "feature",
+        "autoMergeRequest": {"enabledAt": "2026-01-01T00:00:00Z"},
+        "closingIssuesReferences": {"nodes": [{"number": 1, "title": "Bug"}]},
+        "repository": {"name": "repo", "owner": {"login": "owner"}},
+        "commits": {"nodes": [{"commit": {"oid": "abc123", "statusCheckRollup": {"state": "SUCCESS"}}}]},
+        "state": "OPEN",
+    }
     page = _issues_prs_page([issue], [pr])
 
     transport = _make_transport([_gql_response(page, headers={"x-ratelimit-remaining": "4999"})])
@@ -72,6 +87,8 @@ async def test_fetch_issues_and_prs_single_page():
     result = await gql.fetch_issues_and_prs("owner", "repo")
     assert result["issues"] == [issue]
     assert result["pull_requests"] == [pr]
+    assert result["pull_requests"][0]["reviewDecision"] == "APPROVED"
+    assert result["pull_requests"][0]["closingIssuesReferences"]["nodes"][0]["number"] == 1
     assert gql.rate_limit_remaining == 4999
     await gql.close()
 
@@ -247,6 +264,19 @@ async def test_graphql_auth_header():
 
     await gql.fetch_issues_and_prs("owner", "repo")
     assert captured[0] == "bearer mytoken"
+    await gql.close()
+
+
+@pytest.mark.asyncio
+async def test_get_viewer_repository_permission():
+    payload = {"viewer": {"login": "maintainer"}, "repository": {"viewerPermission": "WRITE"}}
+    transport = _make_transport([_gql_response(payload)])
+    gql = GitHubGraphQL(token="tok")
+    gql.client = httpx.AsyncClient(transport=transport, base_url="https://api.github.com/graphql")
+
+    viewer, permission = await gql.get_viewer_repository_permission("owner", "repo")
+    assert viewer == "maintainer"
+    assert permission == "WRITE"
     await gql.close()
 
 

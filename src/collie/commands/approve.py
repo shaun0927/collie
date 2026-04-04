@@ -10,6 +10,8 @@ from collie.core.models import Mode, Recommendation, RecommendationAction
 class ApproveCommand:
     """Handle approve and reject operations."""
 
+    AUTHORIZED_PERMISSIONS = {"ADMIN", "MAINTAIN", "WRITE"}
+
     def __init__(self, rest_client, queue_store, philosophy_store):
         self.rest = rest_client
         self.queue = queue_store
@@ -26,9 +28,11 @@ class ApproveCommand:
         if phil and phil.mode == Mode.TRAINING:
             raise PermissionError("Cannot execute in training mode. Run 'collie unleash' to enable execution.")
 
+        approver = await self._authorize_actor(owner, repo)
+
         # Get recommendations to execute
         if approve_all:
-            approved_numbers = await self.queue.read_approvals(owner, repo)
+            approved_numbers = await self.queue.read_verified_approvals(owner, repo)
             if not approved_numbers:
                 return ExecutionReport()
             numbers = list(approved_numbers)
@@ -36,26 +40,37 @@ class ApproveCommand:
         if not numbers:
             return ExecutionReport()
 
-        # Build recommendation objects for execution
-        # (In a full implementation, we'd load from queue. Simplified here.)
-        recs = [
-            Recommendation(
-                number=n,
-                item_type="pr",  # simplified
-                action=RecommendationAction.MERGE,
-                reason="Approved by user",
-            )
-            for n in numbers
-        ]
+        recs = await self.queue.get_recommendations(owner, repo, numbers=numbers)
+        if not recs:
+            # Backward-compatible fallback for direct `approve owner/repo <numbers...>` flows
+            # when the queue has not been populated with canonical recommendation state yet.
+            recs = [
+                Recommendation(
+                    number=n,
+                    item_type="pr",
+                    action=RecommendationAction.MERGE,
+                    reason="Approved by user",
+                )
+                for n in numbers
+            ]
+
+        await self.queue.record_approvals(owner, repo, [rec.number for rec in recs], approver=approver, source="cli")
 
         # Resolve dependencies and execute
         report = await self.executor.execute_batch(owner, repo, recs)
 
-        # Update queue with results
-        succeeded = [r.number for r in report.succeeded]
-
-        if succeeded:
-            await self.queue.mark_executed(owner, repo, succeeded)
+        # Update queue with execution results, preserving failed items and reasons
+        handled_numbers = [r.number for r in report.succeeded] + [r.number for r in report.failed]
+        if handled_numbers:
+            result_map = {r.number: f"error: {r.message}" for r in report.failed}
+            execution_paths = {r.number: r.execution_path for r in report.results if r.execution_path}
+            await self.queue.mark_executed(
+                owner,
+                repo,
+                handled_numbers,
+                results=result_map,
+                execution_paths=execution_paths,
+            )
 
         return report
 
@@ -82,3 +97,13 @@ class ApproveCommand:
             return f"Add hard rule: breaking_change → hold (from rejection of #{number}: {reason})"
 
         return f"Consider adding rule based on: {reason} (from rejection of #{number})"
+
+
+    async def _authorize_actor(self, owner: str, repo: str) -> str:
+        """Ensure the current viewer is authorized to approve and execute actions."""
+        approver, permission = await self.queue.get_actor_permission(owner, repo)
+        if permission not in self.AUTHORIZED_PERMISSIONS:
+            raise PermissionError(
+                f"Viewer '{approver}' lacks approval permissions for {owner}/{repo} (permission: {permission})."
+            )
+        return approver
